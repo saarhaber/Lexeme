@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { API_BASE_URL } from '../config/api';
 
 const SimpleUpload: React.FC = () => {
   const [message, setMessage] = useState('');
@@ -18,7 +19,7 @@ const SimpleUpload: React.FC = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:8000/api/upload/book', {
+      const response = await fetch(`${API_BASE_URL}/upload/book`, {
         method: 'POST',
         body: formData,
       });

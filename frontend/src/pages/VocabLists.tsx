@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiGet } from '../utils/api';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../config/api';
 
 interface VocabList {
   id: number;

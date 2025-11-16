@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../config/api';
 
 interface User {
   id: number;
@@ -81,7 +80,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Login error:', error);
       // Re-throw with better error message
       if (error instanceof TypeError && error.message.includes('fetch')) {
-        throw new Error('Cannot connect to server. Please make sure the backend is running on http://localhost:8000');
+        throw new Error(`Cannot connect to server. Please check that the backend is running at ${API_BASE_URL}`);
       }
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('Request timed out. The server may be slow or unresponsive. Please try again.');
@@ -142,7 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Registration error:', error);
       // Re-throw with better error message for network failures
       if (error instanceof TypeError && error.message.includes('fetch')) {
-        throw new Error('Cannot connect to server. Please make sure the backend is running on http://localhost:8000');
+        throw new Error(`Cannot connect to server. Please check that the backend is running at ${API_BASE_URL}`);
       }
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('Request timed out. The server may be slow or unresponsive. Please try again.');

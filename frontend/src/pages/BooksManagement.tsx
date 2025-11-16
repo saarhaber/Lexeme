@@ -9,7 +9,7 @@ import SearchBar from '../components/SearchBar';
 import FilterDropdown, { FilterOption } from '../components/FilterDropdown';
 import SortSelector, { SortOption } from '../components/SortSelector';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../config/api';
 
 interface Book {
   id: number;

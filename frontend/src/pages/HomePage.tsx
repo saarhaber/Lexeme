@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import ErrorMessage from '../components/ErrorMessage';
 import ProgressBar from '../components/ProgressBar';
+import { API_BASE_URL } from '../config/api';
 
 const HomePage: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
@@ -95,7 +96,7 @@ const HomePage: React.FC = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      console.log('Making request to:', 'http://localhost:8000/api/upload/book');
+      console.log('Making request to:', `${API_BASE_URL}/upload/book`);
       const startTime = Date.now();
       
       // For FormData, don't set Content-Type - browser will set it with boundary
@@ -111,7 +112,7 @@ const HomePage: React.FC = () => {
         };
       }
       
-      const response = await fetch('http://localhost:8000/api/upload/book', fetchOptions);
+      const response = await fetch(`${API_BASE_URL}/upload/book`, fetchOptions);
       
       const endTime = Date.now();
 

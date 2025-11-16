@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE_URL } from '../config/api';
 
 const TestUpload: React.FC = () => {
   const [result, setResult] = useState<string>('');
@@ -20,7 +21,7 @@ const TestUpload: React.FC = () => {
       
       console.log('Making fetch request...');
       
-      const response = await fetch('http://localhost:8000/api/upload/book', {
+      const response = await fetch(`${API_BASE_URL}/upload/book`, {
         method: 'POST',
         body: formData,
       });

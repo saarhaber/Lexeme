@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE_URL } from '../config/api';
 
 const DiagnosticUpload: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
@@ -31,7 +32,7 @@ const DiagnosticUpload: React.FC = () => {
         addLog(`Making fetch request...`);
         const startTime = Date.now();
         
-        const response = await fetch('http://localhost:8000/api/upload/book', {
+        const response = await fetch(`${API_BASE_URL}/upload/book`, {
           method: 'POST',
           body: formData,
         });

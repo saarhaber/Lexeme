@@ -7,7 +7,7 @@ import AchievementBadge from '../components/AchievementBadge';
 import SkeletonCard from '../components/SkeletonCard';
 import LoadingOverlay from '../components/LoadingOverlay';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../config/api';
 
 interface Book {
   id: number;

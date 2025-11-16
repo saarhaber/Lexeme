@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiGet, apiPost } from '../utils/api';
 import ProgressIndicator from '../components/ProgressIndicator';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../config/api';
 
 interface SRSItem {
   id: number;

@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiGet, apiPost, apiPut } from '../utils/api';
 import AudioPlayer from '../components/AudioPlayer';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../config/api';
 
 interface Lemma {
   id: number;

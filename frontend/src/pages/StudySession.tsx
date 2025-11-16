@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import SkeletonCard from '../components/SkeletonCard';
 import ProgressIndicator from '../components/ProgressIndicator';
+import { API_BASE_URL } from '../config/api';
 
 interface Lemma {
   id: number;
@@ -60,7 +61,7 @@ const StudySession: React.FC = () => {
   useEffect(() => {
     const fetchBooks = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/books');
+        const response = await fetch(`${API_BASE_URL}/books`);
         if (response.ok) {
           const data = await response.json();
           setBooks(data);
@@ -88,7 +89,7 @@ const StudySession: React.FC = () => {
     const fetchChapters = async () => {
       if (!selectedBook) return;
       try {
-        const response = await fetch(`http://localhost:8000/api/vocab/book/${selectedBook}/chapters`);
+        const response = await fetch(`${API_BASE_URL}/vocab/book/${selectedBook}/chapters`);
         if (response.ok) {
           const data = await response.json();
           setChapters(data.chapters || []);
@@ -114,7 +115,7 @@ const StudySession: React.FC = () => {
   const loadVocabularyForStudy = async (bookId: number) => {
     try {
       setLoading(true);
-      let url = `http://localhost:8000/api/vocab/book/${bookId}`;
+      let url = `${API_BASE_URL}/vocab/book/${bookId}`;
       if (selectedChapter !== null) {
         url += `?chapter=${selectedChapter}`;
       }
@@ -187,7 +188,7 @@ const StudySession: React.FC = () => {
     const newStatus = answer === 'correct' ? 'known' : 'learning';
     
     try {
-      await fetch(`http://localhost:8000/api/vocab/status/${currentCard.id}`, {
+      await fetch(`${API_BASE_URL}/vocab/status/${currentCard.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),

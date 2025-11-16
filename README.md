@@ -46,4 +46,3 @@ The app is configured to run at [lexeme.uk](https://lexeme.uk).
 ## License
 
 MIT
-

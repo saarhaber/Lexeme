@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 import uvicorn
+import traceback
 
 from app.routers import books, upload, vocab, srs, auth, reading, vocab_lists, export, audio
 from app.models import Base
@@ -14,7 +17,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS - Allow both React dev server ports
+# Configure CORS - Allow both React dev server ports and production domain
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -28,10 +31,12 @@ app.add_middleware(
         "http://localhost:5174",  # Vite alternative
         "https://lexeme.uk",  # Production domain
         "https://www.lexeme.uk",  # Production domain with www
+        "https://lexeme-production.up.railway.app",  # Railway domain (for direct API access)
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Include routers
@@ -44,6 +49,25 @@ app.include_router(reading.router, prefix="/api/reading", tags=["Reading Mode"])
 app.include_router(vocab_lists.router, prefix="/api/vocab-lists", tags=["Vocabulary Lists"])
 app.include_router(export.router, prefix="/api/export", tags=["Export"])
 app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
+
+# Global exception handler to ensure CORS headers on errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all exceptions and ensure CORS headers are included"""
+    print(f"Unhandled exception: {exc}")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": str(exc),
+            "type": type(exc).__name__
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 # Health check endpoint
 @app.get("/health")

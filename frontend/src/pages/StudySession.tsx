@@ -115,21 +115,45 @@ const StudySession: React.FC = () => {
   const loadVocabularyForStudy = async (bookId: number) => {
     try {
       setLoading(true);
-      let url = `${API_BASE_URL}/vocab/book/${bookId}`;
-      if (selectedChapter !== null) {
-        url += `?chapter=${selectedChapter}`;
-      }
-      const response = await fetch(url);
       
-      if (!response.ok) {
-        throw new Error('Failed to load vocabulary');
+      // Fetch all vocabulary by paginating through all pages
+      let allVocabulary: VocabularyItem[] = [];
+      let page = 1;
+      const limit = 100; // Maximum allowed per page
+      let hasMore = true;
+      
+      while (hasMore) {
+        let url = `${API_BASE_URL}/vocab/book/${bookId}?page=${page}&limit=${limit}`;
+        if (selectedChapter !== null) {
+          url += `&chapter=${selectedChapter}`;
+        }
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load vocabulary: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        const vocabulary = data.vocabulary || [];
+        
+        if (vocabulary.length === 0) {
+          hasMore = false;
+        } else {
+          allVocabulary = [...allVocabulary, ...vocabulary];
+          // Check if we've loaded all pages
+          if (vocabulary.length < limit || allVocabulary.length >= data.total_count) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        }
       }
       
-      const data = await response.json();
-      const vocabulary = data.vocabulary;
+      console.log(`Loaded ${allVocabulary.length} vocabulary words from ${page} page(s)`);
       
       // Convert vocabulary items to study cards
-      const studyCards: StudyCard[] = vocabulary
+      const studyCards: StudyCard[] = allVocabulary
         .filter((item: VocabularyItem) => item.status !== 'known' && item.status !== 'ignored')
         .map((item: VocabularyItem) => ({
           id: item.lemma.id,
@@ -153,6 +177,8 @@ const StudySession: React.FC = () => {
     } catch (error) {
       console.error('Failed to load vocabulary:', error);
       setLoading(false);
+      // Show error message to user
+      alert('Failed to load vocabulary. Please try again or check if the book has been processed.');
     }
   };
 

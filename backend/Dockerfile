@@ -27,6 +27,6 @@ RUN python3 setup_deploy.sh || true
 # Expose port
 EXPOSE 8080
 
-# Start command
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Start command - Railway sets PORT env var
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
 

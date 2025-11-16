@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, distinct
 import sys
 sys.path.append('..')
 from database import get_db
@@ -62,7 +62,8 @@ async def get_book_vocabulary(
     if chapter is not None:
         query = query.filter(Token.chapter == chapter)
     
-    query = query.distinct()
+    # Use distinct on ID to avoid PostgreSQL JSON column issues
+    query = query.distinct(Lemma.id)
     
     # Apply sorting FIRST
     if sort_by == "frequency":
@@ -195,7 +196,8 @@ async def update_vocab_status(
 @router.get("/book/{book_id}/count")
 async def get_book_vocabulary_count(book_id: int, db: Session = Depends(get_db)):
     """Get the total count of vocabulary items for a book."""
-    count = db.query(Lemma).join(Token).filter(Token.book_id == book_id).distinct().count()
+    # Use distinct on ID to avoid PostgreSQL JSON column issues
+    count = db.query(func.count(distinct(Lemma.id))).join(Token).filter(Token.book_id == book_id).scalar()
     return {
         "book_id": book_id,
         "total_count": count

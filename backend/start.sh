@@ -12,6 +12,10 @@ if [ -d "/opt/venv" ]; then
     source /opt/venv/bin/activate
 fi
 
+# Initialize database tables
+echo "Initializing database tables..."
+python3 init_db.py || echo "Warning: Database initialization failed, continuing anyway..."
+
 # Start uvicorn with the port
 exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
 

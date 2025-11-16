@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Database initialization script for Bookabulary
+Database initialization script for Lexeme
 """
 
 from database import engine

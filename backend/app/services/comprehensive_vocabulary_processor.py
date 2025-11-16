@@ -1071,27 +1071,29 @@ class ComprehensiveVocabularyProcessor:
                 spacy_tag = canonical_spacy.get('tag', 'X')
                 spacy_morph = canonical_spacy.get('morph', {})
                 
-                # Perform dictionary lookup for content words (skip common function words)
-                # Note: skip_dict_lookup is defined below, so we check it here
+                # SKIP dictionary lookups during initial processing for performance
+                # Dictionary lookups are slow (HTTP requests with delays) and block processing
+                # Can be added later as a background job if needed
                 dict_info = {}
-                if dictionary_service:
-                    # Check if we should skip this word (common function words)
-                    common_words_skip_dict = {
-                        'it': {'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'di', 'a', 'da', 'in', 'con', 'su', 'per', 'e', 'che', 'è', 'sono'},
-                        'en': {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'is', 'are', 'was', 'were'},
-                        'es': {'el', 'la', 'los', 'las', 'un', 'una', 'de', 'a', 'en', 'con', 'por', 'para'},
-                        'fr': {'le', 'la', 'les', 'un', 'une', 'de', 'à', 'dans', 'pour', 'avec'},
-                        'de': {'der', 'die', 'das', 'ein', 'eine', 'in', 'auf', 'an', 'mit'}
-                    }
-                    skip_dict_lookup = common_words_skip_dict.get(language, set())
-                    
-                    if lemma not in skip_dict_lookup:
-                        try:
-                            # Only lookup dictionary for meaningful words (not articles/prepositions)
-                            dict_info = dictionary_service.get_word_info(lemma, language, "en")
-                        except Exception as e:
-                            print(f"Dictionary lookup failed for '{lemma}': {e}")
-                            dict_info = {}
+                # Dictionary lookups disabled for now - too slow for 30k+ words
+                # if dictionary_service:
+                #     # Check if we should skip this word (common function words)
+                #     common_words_skip_dict = {
+                #         'it': {'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'di', 'a', 'da', 'in', 'con', 'su', 'per', 'e', 'che', 'è', 'sono'},
+                #         'en': {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'is', 'are', 'was', 'were'},
+                #         'es': {'el', 'la', 'los', 'las', 'un', 'una', 'de', 'a', 'en', 'con', 'por', 'para'},
+                #         'fr': {'le', 'la', 'les', 'un', 'une', 'de', 'à', 'dans', 'pour', 'avec'},
+                #         'de': {'der', 'die', 'das', 'ein', 'eine', 'in', 'auf', 'an', 'mit'}
+                #     }
+                #     skip_dict_lookup = common_words_skip_dict.get(language, set())
+                #     
+                #     if lemma not in skip_dict_lookup:
+                #         try:
+                #             # Only lookup dictionary for meaningful words (not articles/prepositions)
+                #             dict_info = dictionary_service.get_word_info(lemma, language, "en")
+                #         except Exception as e:
+                #             print(f"Dictionary lookup failed for '{lemma}': {e}")
+                #             dict_info = {}
                 
                 # Combine all frequencies from all word forms
                 total_frequency = sum(d[1].get('frequency', 0) for d in word_list)
@@ -1250,9 +1252,10 @@ class ComprehensiveVocabularyProcessor:
                 
                 saved_count += 1
                 
-                # OPTIMIZED: Batch commit every 25 lemmas for incremental vocabulary availability
+                # OPTIMIZED: Batch commit every 100 lemmas for incremental vocabulary availability
+                # Reduced commit frequency for better performance with large books (30k+ words)
                 # This allows vocabulary to appear while processing, not all at once at the end
-                if saved_count % 25 == 0:
+                if saved_count % 100 == 0:
                     # First flush any pending lemmas to get IDs
                     if lemma_records:
                         for lr in lemma_records:
@@ -1283,7 +1286,8 @@ class ComprehensiveVocabularyProcessor:
                         token_records = []
                     
                     db.commit()
-                    print(f"  ✅ Committed batch: {saved_count}/{len(lemma_groups)} lemmas, {token_count} tokens")
+                    progress_pct = int((saved_count / max(len(lemma_groups), 1)) * 100)
+                    print(f"  ✅ Committed batch: {saved_count}/{len(lemma_groups)} lemmas ({progress_pct}%), {token_count} tokens")
                     
                     # Update book progress in database for real-time tracking
                     try:
@@ -1292,6 +1296,7 @@ class ComprehensiveVocabularyProcessor:
                             # Update unique_lemmas count as we process
                             book_update.unique_lemmas = saved_count
                             db.commit()
+                            print(f"  📊 Progress updated: {saved_count} lemmas processed")
                     except Exception as e:
                         print(f"  Warning: Could not update book progress: {e}")
                     

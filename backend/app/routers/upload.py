@@ -226,17 +226,19 @@ async def get_upload_status(book_id: int, db: Session = Depends(get_db)):
         # Estimate progress based on vocabulary processing stage
         if book.unique_lemmas > 0:
             # Vocabulary extraction done, now saving to DB
-            # For small books, progress should be higher
+            # Progress is based on unique_lemmas processed vs estimated total
             if book.total_words > 0:
-                # Estimate: 50% (extraction) + up to 45% (saving)
-                # For small books (< 1000 words), assume mostly done
-                if book.total_words < 1000:
-                    progress = 90  # Small books should be almost done
-                else:
-                    # Larger books: estimate based on unique_lemmas
-                    # Assume processing ~100 lemmas per second (very conservative)
-                    estimated_total_time = max(book.unique_lemmas / 100, 1)  # seconds
-                    progress = min(50 + int(45 * min(book.unique_lemmas / max(book.total_words / 5, 1), 0.9)), 99)
+                # Estimate unique lemmas: typically 5-10% of total words for most books
+                # Use a conservative estimate of 7% unique lemmas
+                estimated_unique_lemmas = max(int(book.total_words * 0.07), book.unique_lemmas)
+                
+                # Progress: 30% (extraction) + 70% (saving based on lemmas processed)
+                extraction_progress = 30
+                saving_progress = min(70 * (book.unique_lemmas / max(estimated_unique_lemmas, 1)), 70)
+                progress = int(extraction_progress + saving_progress)
+                
+                # Cap at 99% until actually completed
+                progress = min(progress, 99)
             else:
                 progress = 50
         else:

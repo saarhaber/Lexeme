@@ -56,16 +56,22 @@ async def get_book_vocabulary(
     # Start with base query - filter by book_id through tokens
     # This will return empty if processing hasn't created tokens yet, which is fine
     # Vocabulary appears incrementally as batches are committed
-    query = db.query(Lemma).join(Token).filter(Token.book_id == book_id)
     
-    # Filter by chapter if specified
+    # Use subquery to get distinct lemma IDs first, then join back to Lemma
+    # This avoids PostgreSQL DISTINCT ON ordering restrictions
+    
+    # Build subquery for distinct lemma IDs
+    lemma_ids_subquery = db.query(Token.lemma_id).filter(Token.book_id == book_id)
     if chapter is not None:
-        query = query.filter(Token.chapter == chapter)
+        lemma_ids_subquery = lemma_ids_subquery.filter(Token.chapter == chapter)
+    lemma_ids_subquery = lemma_ids_subquery.distinct().subquery()
     
-    # Use distinct on ID to avoid PostgreSQL JSON column issues
-    query = query.distinct(Lemma.id)
+    # Join back to Lemma table and apply sorting
+    query = db.query(Lemma).join(
+        lemma_ids_subquery, Lemma.id == lemma_ids_subquery.c.lemma_id
+    )
     
-    # Apply sorting FIRST
+    # Apply sorting
     if sort_by == "frequency":
         query = query.order_by(desc(Lemma.global_frequency))
     elif sort_by == "alphabetical":
@@ -73,8 +79,12 @@ async def get_book_vocabulary(
     else:  # chronological (by lemma ID, which reflects insertion order)
         query = query.order_by(desc(Lemma.id))
     
-    # Get total count before pagination
-    total_count = query.count()
+    # Get total count before pagination - use separate query to avoid JSON column issues
+    # Count distinct lemma IDs directly
+    count_query = db.query(func.count(distinct(Lemma.id))).join(Token).filter(Token.book_id == book_id)
+    if chapter is not None:
+        count_query = count_query.filter(Token.chapter == chapter)
+    total_count = count_query.scalar() or 0
     
     # THEN apply limit and offset
     query = query.limit(limit).offset((page - 1) * limit)

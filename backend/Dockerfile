@@ -21,6 +21,10 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY . .
 
+# Copy and make startup script executable
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 # Run setup script
 RUN python3 setup_deploy.sh || true
 
@@ -28,6 +32,5 @@ RUN python3 setup_deploy.sh || true
 EXPOSE 8080
 
 # Start command - Railway sets PORT env var
-# Use shell form to properly expand environment variable
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
+CMD ["/app/start.sh"]
 

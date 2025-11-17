@@ -21,7 +21,7 @@ interface VocabularyItem {
   lemma: Lemma;
   frequency_in_book: number;
   difficulty_estimate: number;
-  status: 'known' | 'learning' | 'unknown' | 'ignored';
+  status: 'learned' | 'unknown' | 'ignored';
   example_sentences: string[];
   collocations: string[];
 }
@@ -41,11 +41,17 @@ const VocabularyExplorer: React.FC = () => {
   const { token } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const normalizeStatusParam = (status: string | null) => {
+    if (!status) return '';
+    if (status === 'known') return 'learned';
+    if (status === 'learning') return 'unknown';
+    return status;
+  };
   const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'chronological');
-  const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '');
+  const [filterStatus, setFilterStatus] = useState<string>(normalizeStatusParam(searchParams.get('status')));
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [currentPage, setCurrentPage] = useState(1);
   const [isPolling, setIsPolling] = useState(false);
@@ -233,12 +239,11 @@ const VocabularyExplorer: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'known':
+      case 'learned':
         return 'bg-green-100 text-green-800 border-green-200';
-      case 'learning':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
       case 'ignored':
         return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'unknown':
       default:
         return 'bg-blue-100 text-blue-800 border-blue-200';
     }
@@ -456,8 +461,7 @@ const VocabularyExplorer: React.FC = () => {
             label="Filter by status"
             options={[
               { value: 'unknown', label: 'Unknown' },
-              { value: 'learning', label: 'Learning' },
-              { value: 'known', label: 'Known' },
+                { value: 'learned', label: 'Learned' },
               { value: 'ignored', label: 'Ignored' },
               { value: 'favorites', label: '⭐ Favorites' }
             ]}
@@ -596,12 +600,11 @@ const VocabularyItem = React.memo<{
 }>(({ item, favorites, onToggleFavorite, onUpdateStatus }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'known':
+        case 'learned':
         return 'bg-green-100 text-green-800 border-green-200';
-      case 'learning':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
       case 'ignored':
         return 'bg-gray-100 text-gray-800 border-gray-200';
+        case 'unknown':
       default:
         return 'bg-blue-100 text-blue-800 border-blue-200';
     }
@@ -695,24 +698,24 @@ const VocabularyItem = React.memo<{
       
       <div className="mt-3 flex gap-2">
         <button
-          onClick={() => onUpdateStatus(item.lemma.id, 'known')}
+          onClick={() => onUpdateStatus(item.lemma.id, 'learned')}
           className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-            item.status === 'known'
+            item.status === 'learned'
               ? 'bg-green-100 text-green-800 border-green-200'
               : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-green-50'
           }`}
         >
-          ✓ Known
+          ✓ Learned
         </button>
         <button
-          onClick={() => onUpdateStatus(item.lemma.id, 'learning')}
+          onClick={() => onUpdateStatus(item.lemma.id, 'unknown')}
           className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-            item.status === 'learning'
-              ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
-              : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-yellow-50'
+            item.status === 'unknown'
+              ? 'bg-blue-100 text-blue-800 border-blue-200'
+              : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-blue-50'
           }`}
         >
-          📚 Learning
+          ❓ Unknown
         </button>
         <button
           onClick={() => onUpdateStatus(item.lemma.id, 'ignored')}

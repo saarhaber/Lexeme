@@ -37,8 +37,7 @@ interface ReadingProgress {
 }
 
 interface VocabularyStats {
-  known: number;
-  learning: number;
+  learned: number;
   unknown: number;
   total: number;
 }
@@ -106,12 +105,11 @@ const BookDashboard: React.FC = () => {
                 if (vocabResponse.ok) {
                   const vocabData = await vocabResponse.json();
                   const vocabulary = vocabData.vocabulary || [];
-                  const stats: VocabularyStats = {
-                    known: vocabulary.filter((v: any) => v.status === 'known').length,
-                    learning: vocabulary.filter((v: any) => v.status === 'learning').length,
-                    unknown: vocabulary.filter((v: any) => v.status === 'unknown').length,
-                    total: vocabulary.length,
-                  };
+                    const stats: VocabularyStats = {
+                      learned: vocabulary.filter((v: any) => v.status === 'learned').length,
+                      unknown: vocabulary.filter((v: any) => v.status === 'unknown').length,
+                      total: vocabulary.length,
+                    };
                   setVocabStats(stats);
                 }
               }
@@ -157,12 +155,11 @@ const BookDashboard: React.FC = () => {
         if (response.ok) {
           const data = await response.json();
           const vocabulary = data.vocabulary || [];
-          const stats: VocabularyStats = {
-            known: vocabulary.filter((v: any) => v.status === 'known').length,
-            learning: vocabulary.filter((v: any) => v.status === 'learning').length,
-            unknown: vocabulary.filter((v: any) => v.status === 'unknown').length,
-            total: vocabulary.length,
-          };
+            const stats: VocabularyStats = {
+              learned: vocabulary.filter((v: any) => v.status === 'learned').length,
+              unknown: vocabulary.filter((v: any) => v.status === 'unknown').length,
+              total: vocabulary.length,
+            };
           setVocabStats(stats);
         }
       } catch (err) {
@@ -180,20 +177,20 @@ const BookDashboard: React.FC = () => {
     }
   }, [bookId, token, book?.processing_status]);
 
-  // Calculate vocabulary mastery level
-  const getMasteryLevel = (): { level: string; percentage: number; color: string } => {
-    if (!vocabStats || vocabStats.total === 0) {
-      return { level: 'Beginner', percentage: 0, color: 'gray' };
-    }
-    const masteredPercentage = (vocabStats.known / vocabStats.total) * 100;
-    if (masteredPercentage >= 80) {
-      return { level: 'Advanced', percentage: masteredPercentage, color: 'green' };
-    } else if (masteredPercentage >= 50) {
-      return { level: 'Intermediate', percentage: masteredPercentage, color: 'blue' };
-    } else {
-      return { level: 'Beginner', percentage: masteredPercentage, color: 'yellow' };
-    }
-  };
+    // Calculate vocabulary mastery level
+    const getMasteryLevel = (): { level: string; percentage: number; color: string } => {
+      if (!vocabStats || vocabStats.total === 0) {
+        return { level: 'Beginner', percentage: 0, color: 'gray' };
+      }
+      const masteredPercentage = (vocabStats.learned / vocabStats.total) * 100;
+      if (masteredPercentage >= 80) {
+        return { level: 'Advanced', percentage: masteredPercentage, color: 'green' };
+      } else if (masteredPercentage >= 50) {
+        return { level: 'Intermediate', percentage: masteredPercentage, color: 'blue' };
+      } else {
+        return { level: 'Beginner', percentage: masteredPercentage, color: 'yellow' };
+      }
+    };
 
   const loadBookPreview = async () => {
     if (!bookId || !token) return;
@@ -322,7 +319,7 @@ const BookDashboard: React.FC = () => {
                         ariaLabel={`Vocabulary mastery: ${mastery.level} level, ${Math.round(mastery.percentage)}% mastered`}
                       />
                       <div className="mt-2 text-xs text-gray-600">
-                        {vocabStats.known} mastered • {vocabStats.learning} learning • {vocabStats.unknown} new
+                          {vocabStats.learned} learned • {vocabStats.unknown} unknown
                       </div>
                     </>
                   );
@@ -403,9 +400,9 @@ const BookDashboard: React.FC = () => {
         <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-5 md:p-6 border border-green-200">
           <div className="text-3xl md:text-4xl mb-4" aria-hidden="true">🔍</div>
           <h3 className="text-lg md:text-xl font-semibold text-gray-900 mb-2">Explore Vocabulary</h3>
-          <p className="text-gray-600 mb-4 text-sm md:text-base">
-            Browse and search through all vocabulary from your book. Mark words as known or unknown.
-          </p>
+            <p className="text-gray-600 mb-4 text-sm md:text-base">
+              Browse and search through all vocabulary from your book. Mark words as learned or unknown.
+            </p>
           <button
             onClick={exploreVocabulary}
             className="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-all duration-200 transform hover:scale-105 active:scale-95 font-medium focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
@@ -511,7 +508,7 @@ const BookDashboard: React.FC = () => {
 
 
       {/* Achievements Section */}
-      {vocabStats && vocabStats.known > 0 && (
+        {vocabStats && vocabStats.learned > 0 && (
         <div className="bg-white rounded-lg shadow-md p-6 mt-8">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Achievements</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -519,21 +516,21 @@ const BookDashboard: React.FC = () => {
               title="First Words"
               description="Learn your first 10 words"
               icon="🌱"
-              unlocked={vocabStats.known >= 10}
+                unlocked={vocabStats.learned >= 10}
               size="sm"
             />
             <AchievementBadge
               title="Vocabulary Builder"
               description="Master 50 words"
               icon="📚"
-              unlocked={vocabStats.known >= 50}
+                unlocked={vocabStats.learned >= 50}
               size="sm"
             />
             <AchievementBadge
               title="Word Master"
               description="Master 100 words"
               icon="⭐"
-              unlocked={vocabStats.known >= 100}
+                unlocked={vocabStats.learned >= 100}
               size="sm"
             />
             <AchievementBadge

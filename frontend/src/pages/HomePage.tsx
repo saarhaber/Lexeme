@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -26,6 +26,12 @@ const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const { login, loginWithGoogle, register, isAuthenticated, user, token } = useAuth();
   const { showToast } = useToast();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/books', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     console.log('handleFileUpload called', event);

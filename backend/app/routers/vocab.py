@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Tuple, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, distinct
 import sys
@@ -8,8 +8,80 @@ sys.path.append('..')
 from database import get_db
 from ..models.lemma import Lemma, Token
 from ..models.user import UserVocabStatus
+from ..services.dictionary_service import DictionaryService
 
 router = APIRouter()
+dictionary_service = DictionaryService()
+MORPHOLOGY_EXCLUDE_KEYS = {
+    'forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'
+}
+
+
+def _has_substantive_grammar(morphology: Any) -> bool:
+    if not isinstance(morphology, dict):
+        return False
+    for key in morphology.keys():
+        if key not in MORPHOLOGY_EXCLUDE_KEYS:
+            return True
+    return False
+
+
+def _format_morphology(existing: Any) -> dict:
+    if isinstance(existing, dict):
+        return dict(existing)
+    return {}
+
+
+def _enrich_lemma_if_needed(lemma: Lemma) -> Tuple[str, dict, str, bool]:
+    """
+    Ensure lemma has translation/grammar data. Returns tuple of
+    (definition, morphology, pos, updated_flag).
+    """
+    definition = (lemma.definition or "").strip()
+    morphology = _format_morphology(lemma.morphology)
+    pos = (lemma.pos or "").strip()
+
+    needs_definition = not definition
+    needs_morphology = not _has_substantive_grammar(morphology)
+    needs_pos = not pos
+
+    if not (needs_definition or needs_morphology or needs_pos):
+        return definition or "", morphology, pos or "", False
+
+    updated = False
+    try:
+        dict_info = dictionary_service.get_word_info(
+            lemma.lemma,
+            (lemma.language or "en").lower(),
+            "en"
+        )
+    except Exception as exc:
+        print(f"[Vocab] Dictionary lookup failed for '{lemma.lemma}': {exc}")
+        return definition or "", morphology, pos or "", False
+
+    if needs_definition:
+        translation = (dict_info.get('translation') or dict_info.get('definition') or "").strip()
+        if translation and translation.lower() != lemma.lemma.lower():
+            definition = translation
+            lemma.definition = translation
+            updated = True
+
+    if needs_morphology:
+        grammar = dict_info.get('grammar') or {}
+        if isinstance(grammar, dict) and grammar:
+            for key, value in grammar.items():
+                if key not in MORPHOLOGY_EXCLUDE_KEYS and (key not in morphology or not morphology[key]):
+                    morphology[key] = value
+            lemma.morphology = morphology
+            updated = True
+
+    if needs_pos and dict_info.get('part_of_speech'):
+        pos_value = str(dict_info['part_of_speech']).upper()
+        pos = pos_value
+        lemma.pos = pos_value[:20]
+        updated = True
+
+    return definition or "", morphology, pos or "", updated
 
 class LemmaResponse(BaseModel):
     id: int
@@ -96,7 +168,12 @@ async def get_book_vocabulary(
     # Get user_id from context (default to 1 for now)
     user_id = 1  # TODO: Get from auth context
     
+    lemmas_updated = False
     for lemma in lemmas:
+        definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma)
+        if updated:
+            lemmas_updated = True
+
         # Get user status (for now, default to unknown)
         user_status = db.query(UserVocabStatus).filter(
             UserVocabStatus.lemma_id == lemma.id,
@@ -114,9 +191,9 @@ async def get_book_vocabulary(
                 id=lemma.id,
                 lemma=lemma.lemma,
                 language=lemma.language,
-                pos=lemma.pos or "",
-                definition=lemma.definition or "",
-                morphology=lemma.morphology or {},
+                pos=pos or lemma.pos or "",
+                definition=definition,
+                morphology=morphology,
                 global_frequency=lemma.global_frequency or 0.0
             ),
             frequency_in_book=frequency_in_book,
@@ -127,6 +204,13 @@ async def get_book_vocabulary(
         )
         vocabulary.append(vocabulary_item)
     
+    if lemmas_updated:
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            print(f"[Vocab] Failed to persist dictionary enrichment: {exc}")
+
     return VocabularyResponse(
         book_id=book_id,
         vocabulary=vocabulary,

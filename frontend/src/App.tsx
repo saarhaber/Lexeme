@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider, useToast } from './contexts/ToastContext';
@@ -46,37 +46,17 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
-const OnboardingCheck: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  useEffect(() => {
-    // Only check onboarding after authentication is confirmed and loading is complete
-    if (!loading && isAuthenticated) {
-      const onboardingCompleted = localStorage.getItem('onboarding_completed');
-      // Only redirect to onboarding if not already there and onboarding not completed
-      if (!onboardingCompleted && location.pathname !== '/onboarding' && location.pathname !== '/auth/callback') {
-        navigate('/onboarding', { replace: true });
-      }
-    }
-  }, [isAuthenticated, loading, navigate, location.pathname]);
-
-  return <>{children}</>;
-};
-
 function AppRoutes() {
   const { toasts, dismissToast } = useToast();
 
   return (
-    <OnboardingCheck>
-      <div className="min-h-screen bg-background">
-        <Navigation />
-        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-        <main className="container mx-auto px-4 py-8">
-          <Suspense fallback={<SkeletonLoader />}>
-            <PageTransition>
-              <Routes>
+    <div className="min-h-screen bg-background">
+      <Navigation />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <main className="container mx-auto px-4 py-8">
+        <Suspense fallback={<SkeletonLoader />}>
+          <PageTransition>
+            <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/onboarding" element={<Onboarding />} />
@@ -168,12 +148,11 @@ function AppRoutes() {
                   </ProtectedRoute>
                 }
               />
-              </Routes>
-            </PageTransition>
-          </Suspense>
-        </main>
-      </div>
-    </OnboardingCheck>
+            </Routes>
+          </PageTransition>
+        </Suspense>
+      </main>
+    </div>
   );
 }
 

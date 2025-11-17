@@ -244,7 +244,6 @@ const VocabularyExplorer: React.FC = () => {
     }
   };
 
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -608,11 +607,29 @@ const VocabularyItem = React.memo<{
     }
   };
 
+  const morphology = item.lemma.morphology || {};
+  const wordForms = Array.isArray((morphology as any).forms) ? (morphology as any).forms : null;
+  const excludeKeys = ['forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'];
+  const grammarEntries = Object.entries(morphology || {})
+    .filter(([key]) => !excludeKeys.includes(key))
+    .map(([key, value]) => {
+      if (value === undefined || value === null || value === '') return '';
+      const keyFormatted = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
+      if (Array.isArray(value)) {
+        return `${keyFormatted}: ${value.join(', ')}`;
+      }
+      if (typeof value === 'boolean') {
+        return value ? keyFormatted : '';
+      }
+      return `${keyFormatted}: ${value}`;
+    })
+    .filter(Boolean);
+
   return (
     <div className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-3 mb-2">
             <button
               onClick={() => onToggleFavorite(item.lemma.id)}
               className={`text-xl transition-transform hover:scale-110 ${
@@ -623,60 +640,53 @@ const VocabularyItem = React.memo<{
             >
               ⭐
             </button>
-            <h3 className="text-xl font-semibold text-gray-900">
+            <h3 className="text-lg sm:text-xl font-semibold text-gray-900 break-words">
               {item.lemma.lemma}
             </h3>
             <AudioPlayer text={item.lemma.lemma} language={item.lemma.language} />
             <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
               {item.lemma.pos || 'NOUN'}
             </span>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-gray-500 break-words">
               Frequency: {item.frequency_in_book}
             </span>
           </div>
           
-          {item.lemma.definition ? (
-            <p className="text-gray-700 mb-2 font-medium">
-              <span className="text-gray-600">Translation:</span> {item.lemma.definition}
-            </p>
-          ) : (
-            <p className="text-gray-500 mb-2 italic text-sm">
-              Translation not available
-            </p>
-          )}
-          
-          {item.lemma.morphology && item.lemma.morphology.forms && item.lemma.morphology.forms.length > 1 && (
-            <div className="text-sm text-gray-600 mb-2">
-              <span className="font-medium">Word Forms:</span>{' '}
-              <span className="text-gray-700">{item.lemma.morphology.forms.join(', ')}</span>
-            </div>
-          )}
-          
-          {item.lemma.morphology && Object.keys(item.lemma.morphology).filter(k => k !== 'forms' && k !== 'form_count' && k !== 'root' && k !== 'prefixes' && k !== 'suffixes').length > 0 && (
-            <div className="text-sm text-gray-600 mb-1">
-              <span className="font-medium">Grammar:</span>{' '}
-              {Object.entries(item.lemma.morphology)
-                .filter(([key]) => {
-                  const excludeKeys = ['forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'];
-                  return !excludeKeys.includes(key);
-                })
-                .map(([key, value]) => {
-                  const keyFormatted = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
-                  if (Array.isArray(value)) {
-                    return `${keyFormatted}: ${value.join(', ')}`;
-                  }
-                  if (value === true || value === false) {
-                    return value ? keyFormatted : '';
-                  }
-                  return `${keyFormatted}: ${value}`;
-                })
-                .filter(v => v)
-                .join(' • ')}
-            </div>
-          )}
+          <div className="space-y-2">
+            {item.lemma.definition ? (
+              <p className="text-gray-700 font-medium break-words">
+                <span className="text-gray-600">Translation:</span>{' '}
+                <span className="break-words">{item.lemma.definition}</span>
+              </p>
+            ) : (
+              <p className="text-gray-500 italic text-sm">
+                Translation not available
+              </p>
+            )}
+            
+            {wordForms && wordForms.length > 1 && (
+              <div className="text-sm text-gray-600">
+                <span className="font-medium">Word Forms:</span>{' '}
+                <span className="text-gray-700 break-words">{wordForms.join(', ')}</span>
+              </div>
+            )}
+            
+            {grammarEntries.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {grammarEntries.map((entry) => (
+                  <span
+                    key={`${item.lemma.id}-${entry}`}
+                    className="text-xs text-gray-700 bg-gray-100 px-2 py-1 rounded-full break-words"
+                  >
+                    {entry}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         
-        <div className="ml-4">
+        <div className="sm:ml-4">
           <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(item.status)}`}>
             {item.status}
           </span>

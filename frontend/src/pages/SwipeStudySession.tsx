@@ -83,13 +83,6 @@ const SwipeStudySession: React.FC = () => {
   const isFlushingRef = useRef(false);
 
   // Load vocabulary
-  useEffect(() => {
-    if (bookId && token) {
-      loadVocabulary();
-      loadLists();
-    }
-  }, [bookId, token, loadVocabulary, loadLists]);
-
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -262,6 +255,13 @@ const SwipeStudySession: React.FC = () => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [flushPendingUpdates]);
+
+  useEffect(() => {
+    if (bookId && token) {
+      loadVocabulary();
+      loadLists();
+    }
+  }, [bookId, token, loadVocabulary, loadLists]);
 
   // Touch/Mouse event handlers
   const handleStart = (clientX: number, clientY: number) => {

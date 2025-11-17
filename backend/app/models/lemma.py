@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Float, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Float, JSON, ForeignKey, Index
 from .base import Base
 
 class Lemma(Base):
@@ -15,6 +15,10 @@ class Lemma(Base):
 
 class Token(Base):
     __tablename__ = "tokens"
+    __table_args__ = (
+        Index("ix_tokens_book_lemma", "book_id", "lemma_id"),
+        Index("ix_tokens_book_chapter", "book_id", "chapter"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     book_id = Column(Integer, ForeignKey("books.id"), nullable=False)

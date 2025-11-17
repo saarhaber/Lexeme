@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Index
 from .base import Base, TimestampMixin
 
 class User(Base, TimestampMixin):
@@ -13,6 +13,9 @@ class User(Base, TimestampMixin):
 
 class UserVocabStatus(Base, TimestampMixin):
     __tablename__ = "user_vocab_status"
+    __table_args__ = (
+        Index("ix_user_vocab_status_user_lemma", "user_id", "lemma_id", unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)

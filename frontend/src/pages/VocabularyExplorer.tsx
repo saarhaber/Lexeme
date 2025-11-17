@@ -98,8 +98,11 @@ const VocabularyExplorer: React.FC = () => {
       if (!append) {
         setLoading(true);
       }
+      const statusQuery = filterStatus && filterStatus !== 'favorites'
+        ? `&filter_status=${filterStatus}`
+        : '';
       const response = await apiGet(
-        `/vocab/book/${bookId}?sort_by=${sortBy}&page=${currentPage}&limit=100`,
+        `/vocab/book/${bookId}?sort_by=${sortBy}&page=${currentPage}&limit=100${statusQuery}`,
         token
       );
       
@@ -201,7 +204,7 @@ const VocabularyExplorer: React.FC = () => {
       };
       checkStatus();
     }
-  }, [bookId, sortBy, currentPage, token]);
+  }, [bookId, sortBy, currentPage, filterStatus, token]);
 
   // Poll for new vocabulary when in chronological mode and processing is ongoing
   useEffect(() => {

@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from pydantic import BaseModel
 from typing import List, Optional, Tuple, Any, Dict
@@ -7,6 +8,7 @@ import sys
 sys.path.append('..')
 from database import get_db
 from ..models.lemma import Lemma, Token
+from ..models.book import Book
 from ..models.user import User, UserVocabStatus
 from ..services.dictionary_service import DictionaryService
 from ..utils.security import decode_access_token, oauth2_scheme
@@ -55,6 +57,7 @@ MORPHOLOGY_EXCLUDE_KEYS = {
 }
 STATUS_LEARNED_VALUES = {"learned", "known", "mastered"}
 STATUS_UNKNOWN_VALUES = {"unknown", "learning", "new"}
+ALLOWED_STATUS_INPUTS = STATUS_LEARNED_VALUES.union(STATUS_UNKNOWN_VALUES).union({"ignored"})
 
 
 def _has_substantive_grammar(morphology: Any) -> bool:
@@ -169,6 +172,23 @@ def _build_status_filter_clause(status_column, desired_status: Optional[str]):
     return None
 
 
+def _build_frequency_map(
+    db: Session,
+    book_id: int,
+    lemma_ids: List[int]
+) -> Dict[int, int]:
+    if not lemma_ids:
+        return {}
+    freq_results = db.query(
+        Token.lemma_id,
+        func.count(Token.id).label("frequency")
+    ).filter(
+        Token.book_id == book_id,
+        Token.lemma_id.in_(lemma_ids)
+    ).group_by(Token.lemma_id).all()
+    return {lemma_id: frequency for lemma_id, frequency in freq_results}
+
+
 class LemmaResponse(BaseModel):
     id: int
     lemma: str
@@ -195,6 +215,55 @@ class VocabularyResponse(BaseModel):
     sort_by: str
     filter_status: Optional[str]
 
+
+class VocabStatusUpdateRequest(BaseModel):
+    lemma_id: int
+    status: str
+
+
+class BulkStatusUpdateRequest(BaseModel):
+    updates: List[VocabStatusUpdateRequest]
+
+
+def _build_vocabulary_items(
+    lemmas_with_status,
+    frequency_map: Dict[int, int],
+    enrich_lemmas: bool,
+    db: Session
+):
+    vocabulary: List[VocabularyItem] = []
+    lemmas_updated = False
+    for lemma, user_status_value in lemmas_with_status:
+        if enrich_lemmas:
+            definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma)
+            if updated:
+                lemmas_updated = True
+        else:
+            definition = (lemma.definition or "").strip()
+            morphology = _format_morphology(lemma.morphology)
+            pos = (lemma.pos or "").strip()
+        normalized_status = _normalize_status_value(user_status_value)
+        frequency_in_book = frequency_map.get(lemma.id, 0)
+        
+        vocabulary_item = VocabularyItem(
+            lemma=LemmaResponse(
+                id=lemma.id,
+                lemma=lemma.lemma,
+                language=lemma.language,
+                pos=pos or lemma.pos or "",
+                definition=definition,
+                morphology=morphology,
+                global_frequency=lemma.global_frequency or 0.0
+            ),
+            frequency_in_book=frequency_in_book,
+            difficulty_estimate=0.0,
+            status=normalized_status,
+            example_sentences=[],
+            collocations=[]
+        )
+        vocabulary.append(vocabulary_item)
+    return vocabulary, lemmas_updated
+
 @router.get("/book/{book_id}", response_model=VocabularyResponse)
 async def get_book_vocabulary(
     book_id: int,
@@ -207,7 +276,6 @@ async def get_book_vocabulary(
     current_user: dict = Depends(get_current_user_real)
 ):
     # Check if book exists and is processing - allow partial results
-    from ..models.book import Book
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
@@ -264,46 +332,14 @@ async def get_book_vocabulary(
     
     lemmas_with_status = query.all()
     
-    vocabulary = []
-    
     lemma_ids = [lemma.id for lemma, _ in lemmas_with_status]
-    frequency_map: Dict[int, int] = {}
-    if lemma_ids:
-        freq_results = db.query(
-            Token.lemma_id,
-            func.count(Token.id).label("frequency")
-        ).filter(
-            Token.book_id == book_id,
-            Token.lemma_id.in_(lemma_ids)
-        ).group_by(Token.lemma_id).all()
-        frequency_map = {lemma_id: frequency for lemma_id, frequency in freq_results}
-    
-    lemmas_updated = False
-    for lemma, user_status_value in lemmas_with_status:
-        definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma)
-        if updated:
-            lemmas_updated = True
-
-        normalized_status = _normalize_status_value(user_status_value)
-        frequency_in_book = frequency_map.get(lemma.id, 0)
-        
-        vocabulary_item = VocabularyItem(
-            lemma=LemmaResponse(
-                id=lemma.id,
-                lemma=lemma.lemma,
-                language=lemma.language,
-                pos=pos or lemma.pos or "",
-                definition=definition,
-                morphology=morphology,
-                global_frequency=lemma.global_frequency or 0.0
-            ),
-            frequency_in_book=frequency_in_book,
-            difficulty_estimate=0.0,
-            status=normalized_status,
-            example_sentences=[],
-            collocations=[]
-        )
-        vocabulary.append(vocabulary_item)
+    frequency_map = _build_frequency_map(db, book_id, lemma_ids)
+    vocabulary, lemmas_updated = _build_vocabulary_items(
+        lemmas_with_status,
+        frequency_map,
+        True,
+        db
+    )
     
     if lemmas_updated:
         try:
@@ -319,6 +355,63 @@ async def get_book_vocabulary(
         page=page,
         limit=limit,
         sort_by=sort_by,
+        filter_status=normalized_filter_status
+    )
+
+
+@router.get("/book/{book_id}/swipe-session", response_model=VocabularyResponse)
+async def get_swipe_session_vocabulary(
+    book_id: int,
+    limit: int = Query(200, ge=20, le=400),
+    filter_status: Optional[str] = Query("unknown", regex="^(learned|known|learning|unknown|ignored)$"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_real)
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    user_id = current_user["user_id"]
+    normalized_filter_status = _normalize_status_value(filter_status) if filter_status else None
+    overfetch_factor = 3
+    
+    lemma_ids_subquery = db.query(Token.lemma_id).filter(Token.book_id == book_id).distinct().subquery()
+    
+    status_subquery = db.query(
+        UserVocabStatus.lemma_id.label("lemma_id"),
+        UserVocabStatus.status.label("status")
+    ).filter(UserVocabStatus.user_id == user_id).subquery()
+    
+    query = db.query(Lemma, status_subquery.c.status.label("user_status")).join(
+        lemma_ids_subquery, Lemma.id == lemma_ids_subquery.c.lemma_id
+    ).outerjoin(
+        status_subquery, Lemma.id == status_subquery.c.lemma_id
+    )
+    
+    filter_clause = _build_status_filter_clause(status_subquery.c.status, normalized_filter_status)
+    if filter_clause is not None:
+        query = query.filter(filter_clause)
+    
+    lemmas_with_status = query.order_by(func.random()).limit(limit * overfetch_factor).all()
+    lemma_ids = [lemma.id for lemma, _ in lemmas_with_status]
+    frequency_map = _build_frequency_map(db, book_id, lemma_ids)
+    
+    vocabulary, _ = _build_vocabulary_items(
+        lemmas_with_status,
+        frequency_map,
+        False,
+        db
+    )
+    
+    trimmed_vocabulary = vocabulary[:limit]
+    
+    return VocabularyResponse(
+        book_id=book_id,
+        vocabulary=trimmed_vocabulary,
+        total_count=len(trimmed_vocabulary),
+        page=1,
+        limit=limit,
+        sort_by="swipe_session",
         filter_status=normalized_filter_status
     )
 
@@ -354,6 +447,71 @@ async def get_lemma_details(
         "collocations": []
     }
 
+@router.post("/status/bulk")
+async def bulk_update_vocab_status(
+    payload: BulkStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_real)
+):
+    updates = payload.updates or []
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+    if len(updates) > 500:
+        raise HTTPException(status_code=400, detail="Too many updates requested (max 500)")
+    
+    normalized_updates: Dict[int, str] = {}
+    for update in updates:
+        status_lower = (update.status or "").lower()
+        if status_lower and status_lower not in ALLOWED_STATUS_INPUTS:
+            raise HTTPException(status_code=400, detail=f"Invalid status value: {update.status}")
+        normalized_updates[update.lemma_id] = _normalize_status_value(update.status)
+    
+    lemma_ids = list(normalized_updates.keys())
+    if not lemma_ids:
+        raise HTTPException(status_code=400, detail="No valid updates provided")
+    
+    existing_lemmas = {
+        row[0] for row in db.query(Lemma.id).filter(Lemma.id.in_(lemma_ids)).all()
+    }
+    normalized_updates = {
+        lemma_id: status for lemma_id, status in normalized_updates.items()
+        if lemma_id in existing_lemmas
+    }
+    if not normalized_updates:
+        raise HTTPException(status_code=404, detail="No matching lemmas found for updates")
+    
+    user_id = current_user.get("user_id", 1)
+    existing_statuses = db.query(UserVocabStatus).filter(
+        UserVocabStatus.user_id == user_id,
+        UserVocabStatus.lemma_id.in_(list(normalized_updates.keys()))
+    ).all()
+    existing_map = {status.lemma_id: status for status in existing_statuses}
+    
+    updated_count = 0
+    for lemma_id, normalized_status in normalized_updates.items():
+        user_status = existing_map.get(lemma_id)
+        if user_status:
+            if user_status.status != normalized_status:
+                user_status.status = normalized_status
+                updated_count += 1
+        else:
+            new_status = UserVocabStatus(
+                lemma_id=lemma_id,
+                user_id=user_id,
+                status=normalized_status
+            )
+            db.add(new_status)
+            updated_count += 1
+    
+    db.commit()
+    
+    return {
+        "updated": updated_count,
+        "requested": len(normalized_updates),
+        "user_id": user_id
+    }
+
+
 @router.put("/status/{lemma_id}")
 async def update_vocab_status(
     lemma_id: int, 
@@ -368,8 +526,7 @@ async def update_vocab_status(
     
     status_input = status_data.get("status", "unknown")
     status_lower = (status_input or "").lower()
-    allowed_status_inputs = STATUS_LEARNED_VALUES.union(STATUS_UNKNOWN_VALUES).union({"ignored", ""})
-    if status_lower not in allowed_status_inputs:
+    if status_lower and status_lower not in ALLOWED_STATUS_INPUTS:
         raise HTTPException(status_code=400, detail="Invalid status value")
     status = status_input or "unknown"
     normalized_status = _normalize_status_value(status)

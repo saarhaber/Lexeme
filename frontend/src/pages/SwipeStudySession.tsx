@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { apiGet, apiPost, apiPut } from '../utils/api';
+import { apiGet, apiPost } from '../utils/api';
 import AudioPlayer from '../components/AudioPlayer';
-
-import { API_BASE_URL } from '../config/api';
 
 interface Lemma {
   id: number;
@@ -34,12 +32,27 @@ interface VocabList {
   created_at: string;
 }
 
+interface SwipeSessionResponse {
+  book_id: number;
+  vocabulary: VocabularyItem[];
+}
+
+interface PendingUpdate {
+  lemmaId: number;
+  status: 'learned' | 'unknown';
+}
+
 interface CardPosition {
   x: number;
   y: number;
   rotation: number;
   opacity: number;
 }
+
+const MAX_SESSION_WORDS = 200;
+const BULK_THRESHOLD = 6;
+const BULK_MAX = 40;
+const BULK_FLUSH_INTERVAL = 1500;
 
 const SwipeStudySession: React.FC = () => {
   const { bookId } = useParams<{ bookId: string }>();
@@ -65,15 +78,11 @@ const SwipeStudySession: React.FC = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const currentDragDelta = useRef({ x: 0, y: 0 });
   const hasDragged = useRef(false);
+  const pendingUpdatesRef = useRef<PendingUpdate[]>([]);
+  const flushTimeoutRef = useRef<number | null>(null);
+  const isFlushingRef = useRef(false);
 
   // Load vocabulary
-  useEffect(() => {
-    if (bookId && token) {
-      loadVocabulary();
-      loadLists();
-    }
-  }, [bookId, token]);
-
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -85,47 +94,59 @@ const SwipeStudySession: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-    const loadVocabulary = async () => {
-      if (!bookId || !token) return;
-      try {
-        setLoading(true);
-        const MAX_SESSION_WORDS = 200;
-        const endpoint = `/vocab/book/${bookId}?page=1&limit=${MAX_SESSION_WORDS}&sort_by=random&filter_status=unknown`;
-        const response = await apiGet(endpoint, token);
-        if (!response.ok) {
-          throw new Error('Failed to load vocabulary');
-        }
-        const data = await response.json();
-        const vocabulary: VocabularyItem[] = data.vocabulary || [];
+  const resetCardPosition = useCallback(() => {
+    setCardPosition({ x: 0, y: 0, rotation: 0, opacity: 1 });
+    setShowTranslation(false);
+  }, []);
 
-        // Remove ignored words and deduplicate by lemma ID
-        const dedupedMap = new Map<number, VocabularyItem>();
-        vocabulary
-          .filter((item: VocabularyItem) => item.status !== 'ignored')
-          .forEach((item: VocabularyItem) => {
-            if (!dedupedMap.has(item.lemma.id)) {
-              dedupedMap.set(item.lemma.id, item);
-            }
-          });
-
-        const uniqueWords = Array.from(dedupedMap.values());
-        const randomizedWords = uniqueWords
-          .sort(() => Math.random() - 0.5)
-          .slice(0, MAX_SESSION_WORDS);
-
-        setWords(randomizedWords);
-        setCurrentIndex(0);
-        setShowTranslation(false);
-        resetCardPosition();
-      } catch (error) {
-        console.error('Failed to load vocabulary:', error);
-        setError('Failed to load vocabulary. Please check if the book has been processed.');
-      } finally {
-        setLoading(false);
+  const loadVocabulary = useCallback(async () => {
+    if (!bookId || !token) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const endpoint = `/vocab/book/${bookId}/swipe-session?limit=${MAX_SESSION_WORDS}&filter_status=unknown`;
+      const response = await apiGet(endpoint, token);
+      if (!response.ok) {
+        throw new Error('Failed to load vocabulary');
       }
-    };
+      const data: SwipeSessionResponse = await response.json();
+      const vocabulary: VocabularyItem[] = data.vocabulary || [];
 
-  const loadLists = async () => {
+      const sanitizedWords = vocabulary.map((item) => ({
+        ...item,
+        lemma: {
+          ...item.lemma,
+          morphology: item.lemma.morphology || {}
+        },
+        example_sentences: item.example_sentences || [],
+        collocations: item.collocations || []
+      }));
+
+      const dedupedMap = new Map<number, VocabularyItem>();
+      sanitizedWords
+        .filter((item) => item.status !== 'ignored')
+        .forEach((item) => {
+          if (!dedupedMap.has(item.lemma.id)) {
+            dedupedMap.set(item.lemma.id, item);
+          }
+        });
+
+      const uniqueWords = Array.from(dedupedMap.values());
+
+      setWords(uniqueWords);
+      setCurrentIndex(0);
+      setShowTranslation(false);
+      resetCardPosition();
+    } catch (error) {
+      console.error('Failed to load vocabulary:', error);
+      setError('Failed to load vocabulary. Please check if the book has been processed.');
+    } finally {
+      setLoading(false);
+    }
+  }, [bookId, token, resetCardPosition]);
+
+  const loadLists = useCallback(async () => {
+    if (!token) return;
     try {
       const response = await apiGet('/vocab-lists/', token);
       if (response.ok) {
@@ -135,12 +156,112 @@ const SwipeStudySession: React.FC = () => {
     } catch (error) {
       console.error('Failed to load lists:', error);
     }
-  };
+  }, [token]);
 
-  const resetCardPosition = () => {
-    setCardPosition({ x: 0, y: 0, rotation: 0, opacity: 1 });
-    setShowTranslation(false);
-  };
+  const flushPendingUpdates = useCallback(async (force: boolean = false) => {
+    if (!token) return;
+    const pendingCount = pendingUpdatesRef.current.length;
+    if (!force && pendingCount < BULK_THRESHOLD) {
+      if (!flushTimeoutRef.current) {
+        flushTimeoutRef.current = window.setTimeout(() => {
+          flushTimeoutRef.current = null;
+          flushPendingUpdates(true);
+        }, BULK_FLUSH_INTERVAL);
+      }
+      return;
+    }
+
+    if (flushTimeoutRef.current) {
+      clearTimeout(flushTimeoutRef.current);
+      flushTimeoutRef.current = null;
+    }
+
+    if (isFlushingRef.current) {
+      return;
+    }
+
+    const batch = pendingUpdatesRef.current.splice(0, BULK_MAX);
+    if (!batch.length) {
+      return;
+    }
+
+    isFlushingRef.current = true;
+
+    const dedupedMap = new Map<number, 'learned' | 'unknown'>();
+    batch.forEach(({ lemmaId, status }) => dedupedMap.set(lemmaId, status));
+
+    const payload = Array.from(dedupedMap.entries()).map(([lemmaId, status]) => ({
+      lemma_id: lemmaId,
+      status
+    }));
+
+    try {
+      await apiPost('/vocab/status/bulk', { updates: payload }, token);
+    } catch (error) {
+      console.error('Failed to flush status updates:', error);
+      const retryItems = payload.map(({ lemma_id, status }) => ({ lemmaId: lemma_id, status }));
+      pendingUpdatesRef.current.unshift(...retryItems);
+    } finally {
+      isFlushingRef.current = false;
+      if (pendingUpdatesRef.current.length) {
+        if (pendingUpdatesRef.current.length >= BULK_THRESHOLD) {
+          flushPendingUpdates(true);
+        } else if (!flushTimeoutRef.current) {
+          flushTimeoutRef.current = window.setTimeout(() => {
+            flushTimeoutRef.current = null;
+            flushPendingUpdates(true);
+          }, BULK_FLUSH_INTERVAL);
+        }
+      }
+    }
+  }, [token]);
+
+  const queueStatusUpdate = useCallback((lemmaId: number, status: 'learned' | 'unknown') => {
+    pendingUpdatesRef.current.push({ lemmaId, status });
+
+    if (pendingUpdatesRef.current.length >= BULK_THRESHOLD) {
+      flushPendingUpdates(true);
+    } else {
+      if (flushTimeoutRef.current) {
+        clearTimeout(flushTimeoutRef.current);
+      }
+      flushTimeoutRef.current = window.setTimeout(() => {
+        flushTimeoutRef.current = null;
+        flushPendingUpdates(true);
+      }, BULK_FLUSH_INTERVAL);
+    }
+  }, [flushPendingUpdates]);
+
+  useEffect(() => {
+    return () => {
+      flushPendingUpdates(true);
+    };
+  }, [flushPendingUpdates]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPendingUpdates(true);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [flushPendingUpdates]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        flushPendingUpdates(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [flushPendingUpdates]);
+
+  useEffect(() => {
+    if (bookId && token) {
+      loadVocabulary();
+      loadLists();
+    }
+  }, [bookId, token, loadVocabulary, loadLists]);
 
   // Touch/Mouse event handlers
   const handleStart = (clientX: number, clientY: number) => {
@@ -217,20 +338,13 @@ const SwipeStudySession: React.FC = () => {
     if (currentIndex >= words.length) return;
     
     const currentWord = words[currentIndex];
+    queueStatusUpdate(currentWord.lemma.id, status);
     
-    // Update word status
-    try {
-      await apiPut(`/vocab/status/${currentWord.lemma.id}`, { status }, token);
-    } catch (error) {
-      console.error('Failed to update word status:', error);
-    }
-    
-    // Move to next word
     if (currentIndex < words.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+      setCurrentIndex((prev) => prev + 1);
       resetCardPosition();
     } else {
-      // Session complete
+      await flushPendingUpdates(true);
       alert('Study session complete! 🎉');
       navigate('/books');
     }

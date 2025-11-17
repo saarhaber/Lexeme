@@ -85,54 +85,45 @@ const SwipeStudySession: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const loadVocabulary = async () => {
-    if (!bookId || !token) return;
-    try {
-      setLoading(true);
-      const MAX_SESSION_WORDS = 200;
-      const limit = 100; // API maximum
-      const buildEndpoint = (pageNumber: number) => 
-        `/vocab/book/${bookId}?page=${pageNumber}&limit=${limit}&sort_by=frequency&filter_status=unknown`;
-      const fetchPage = async (pageNumber: number) => {
-        const response = await apiGet(buildEndpoint(pageNumber), token);
+    const loadVocabulary = async () => {
+      if (!bookId || !token) return;
+      try {
+        setLoading(true);
+        const MAX_SESSION_WORDS = 200;
+        const endpoint = `/vocab/book/${bookId}?page=1&limit=${MAX_SESSION_WORDS}&sort_by=random&filter_status=unknown`;
+        const response = await apiGet(endpoint, token);
         if (!response.ok) {
           throw new Error('Failed to load vocabulary');
         }
-        return response.json();
-      };
+        const data = await response.json();
+        const vocabulary: VocabularyItem[] = data.vocabulary || [];
 
-      const firstPage = await fetchPage(1);
-      let allVocabulary: VocabularyItem[] = firstPage.vocabulary || [];
-      const totalCount = firstPage.total_count || allVocabulary.length;
-      const desiredCount = Math.min(totalCount, MAX_SESSION_WORDS);
-      const effectiveCount = desiredCount > 0 ? desiredCount : allVocabulary.length;
-      const pagesNeeded = Math.max(1, Math.ceil(Math.min(effectiveCount || limit, MAX_SESSION_WORDS) / limit));
+        // Remove ignored words and deduplicate by lemma ID
+        const dedupedMap = new Map<number, VocabularyItem>();
+        vocabulary
+          .filter((item: VocabularyItem) => item.status !== 'ignored')
+          .forEach((item: VocabularyItem) => {
+            if (!dedupedMap.has(item.lemma.id)) {
+              dedupedMap.set(item.lemma.id, item);
+            }
+          });
 
-      if (pagesNeeded > 1) {
-        const remainingPages = Array.from({ length: pagesNeeded - 1 }, (_, idx) => idx + 2);
-        const pageData = await Promise.all(remainingPages.map(page => fetchPage(page)));
-        pageData.forEach(page => {
-          allVocabulary = allVocabulary.concat(page.vocabulary || []);
-        });
+        const uniqueWords = Array.from(dedupedMap.values());
+        const randomizedWords = uniqueWords
+          .sort(() => Math.random() - 0.5)
+          .slice(0, MAX_SESSION_WORDS);
+
+        setWords(randomizedWords);
+        setCurrentIndex(0);
+        setShowTranslation(false);
+        resetCardPosition();
+      } catch (error) {
+        console.error('Failed to load vocabulary:', error);
+        setError('Failed to load vocabulary. Please check if the book has been processed.');
+      } finally {
+        setLoading(false);
       }
-
-      const targetCount = effectiveCount || 0;
-      const studyWords = allVocabulary
-        .filter((item: VocabularyItem) => item.status !== 'ignored')
-        .slice(0, targetCount)
-        .sort(() => Math.random() - 0.5);
-
-      setWords(studyWords);
-      setCurrentIndex(0);
-      setShowTranslation(false);
-      resetCardPosition();
-    } catch (error) {
-      console.error('Failed to load vocabulary:', error);
-      setError('Failed to load vocabulary. Please check if the book has been processed.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
   const loadLists = async () => {
     try {

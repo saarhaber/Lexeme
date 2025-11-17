@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, status
 from pydantic import BaseModel
 from typing import List, Optional, Tuple, Any, Dict
 from sqlalchemy.orm import Session
@@ -7,11 +7,49 @@ import sys
 sys.path.append('..')
 from database import get_db
 from ..models.lemma import Lemma, Token
-from ..models.user import UserVocabStatus
+from ..models.user import User, UserVocabStatus
 from ..services.dictionary_service import DictionaryService
+from ..utils.security import decode_access_token, oauth2_scheme
 
 router = APIRouter()
 dictionary_service = DictionaryService()
+
+
+def get_current_user_real(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Authenticate the current user via JWT."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    payload = decode_access_token(token)
+    if payload is None:
+        raise credentials_exception
+
+    user_id_str = payload.get("sub")
+    if user_id_str is None:
+        raise credentials_exception
+
+    try:
+        user_id = int(user_id_str)
+    except (ValueError, TypeError):
+        raise credentials_exception
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise credentials_exception
+
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "language_level": user.language_level
+    }
+
 MORPHOLOGY_EXCLUDE_KEYS = {
     'forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'
 }
@@ -161,11 +199,12 @@ class VocabularyResponse(BaseModel):
 async def get_book_vocabulary(
     book_id: int,
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=100),
-    sort_by: str = Query("frequency", regex="^(frequency|alphabetical|chronological)$"),
+    limit: int = Query(50, ge=1, le=1000),
+    sort_by: str = Query("frequency", regex="^(frequency|alphabetical|chronological|random)$"),
     filter_status: Optional[str] = Query(None, regex="^(learned|known|learning|unknown|ignored)$"),
     chapter: Optional[int] = Query(None, ge=0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_real)
 ):
     # Check if book exists and is processing - allow partial results
     from ..models.book import Book
@@ -177,7 +216,7 @@ async def get_book_vocabulary(
     # This will return empty if processing hasn't created tokens yet, which is fine
     # Vocabulary appears incrementally as batches are committed
     
-    user_id = 1  # TODO: Get from auth context
+    user_id = current_user["user_id"]
 
     lemma_ids_subquery = db.query(Token.lemma_id).filter(Token.book_id == book_id)
     if chapter is not None:
@@ -199,6 +238,8 @@ async def get_book_vocabulary(
         query = query.order_by(desc(Lemma.global_frequency))
     elif sort_by == "alphabetical":
         query = query.order_by(Lemma.lemma)
+    elif sort_by == "random":
+        query = query.order_by(func.random())
     else:  # chronological (by lemma ID, which reflects insertion order)
         query = query.order_by(desc(Lemma.id))
     
@@ -282,13 +323,18 @@ async def get_book_vocabulary(
     )
 
 @router.get("/lemma/{lemma_id}")
-async def get_lemma_details(lemma_id: int, db: Session = Depends(get_db)):
+async def get_lemma_details(
+    lemma_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_real)
+):
     lemma = db.query(Lemma).filter(Lemma.id == lemma_id).first()
     if not lemma:
         raise HTTPException(status_code=404, detail="Lemma not found")
     
     user_status = db.query(UserVocabStatus).filter(
-        UserVocabStatus.lemma_id == lemma_id
+        UserVocabStatus.lemma_id == lemma_id,
+        UserVocabStatus.user_id == current_user["user_id"]
     ).first()
     normalized_status = _normalize_status_value(user_status.status if user_status else None)
     
@@ -313,7 +359,7 @@ async def update_vocab_status(
     lemma_id: int, 
     status_data: dict,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(lambda: {"user_id": 1})  # TODO: Proper auth
+      current_user: dict = Depends(get_current_user_real)
 ):
     # Check if lemma exists
     lemma = db.query(Lemma).filter(Lemma.id == lemma_id).first()

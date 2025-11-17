@@ -94,6 +94,11 @@ const SwipeStudySession: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const resetCardPosition = useCallback(() => {
+    setCardPosition({ x: 0, y: 0, rotation: 0, opacity: 1 });
+    setShowTranslation(false);
+  }, []);
+
   const loadVocabulary = useCallback(async () => {
     if (!bookId || !token) return;
     try {
@@ -152,11 +157,6 @@ const SwipeStudySession: React.FC = () => {
       console.error('Failed to load lists:', error);
     }
   }, [token]);
-
-  const resetCardPosition = useCallback(() => {
-    setCardPosition({ x: 0, y: 0, rotation: 0, opacity: 1 });
-    setShowTranslation(false);
-  }, []);
 
   const flushPendingUpdates = useCallback(async (force: boolean = false) => {
     if (!token) return;

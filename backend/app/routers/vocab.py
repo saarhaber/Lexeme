@@ -40,25 +40,42 @@ def _enrich_lemma_if_needed(lemma: Lemma) -> Tuple[str, dict, str, bool]:
     definition = (lemma.definition or "").strip()
     morphology = _format_morphology(lemma.morphology)
     pos = (lemma.pos or "").strip()
+    language_code = (lemma.language or "en").lower()
+    updated = False
+    
+    # Normalize lemma to its canonical form (e.g., infinitive for verbs)
+    normalized = dictionary_service.normalize_word_form(lemma.lemma, language_code)
+    if normalized and normalized != lemma.lemma:
+        lemma.lemma = normalized
+        lemma.definition = None
+        definition = ""
+        updated = True
 
-    needs_definition = not definition
+    needs_definition = (not definition) or (definition.lower() == lemma.lemma.lower())
     needs_morphology = not _has_substantive_grammar(morphology)
     needs_pos = not pos
 
     if not (needs_definition or needs_morphology or needs_pos):
         return definition or "", morphology, pos or "", False
 
-    updated = False
     try:
         dict_info = dictionary_service.get_word_info(
             lemma.lemma,
-            (lemma.language or "en").lower(),
+            language_code,
             "en"
         )
     except Exception as exc:
         print(f"[Vocab] Dictionary lookup failed for '{lemma.lemma}': {exc}")
         return definition or "", morphology, pos or "", False
 
+    normalized_from_dict = (dict_info.get('normalized_word') or "").strip()
+    if normalized_from_dict and normalized_from_dict != lemma.lemma:
+        lemma.lemma = normalized_from_dict
+        lemma.definition = None
+        definition = ""
+        needs_definition = True
+        updated = True
+    
     if needs_definition:
         translation = (dict_info.get('translation') or dict_info.get('definition') or "").strip()
         if translation and translation.lower() != lemma.lemma.lower():

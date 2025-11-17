@@ -6,6 +6,7 @@ import requests
 from typing import Dict, List, Optional
 import json
 import time
+import re
 
 class DictionaryService:
     """Service for fetching word definitions, translations, and grammar information."""
@@ -13,6 +14,20 @@ class DictionaryService:
     def __init__(self):
         self.cache = {}
         self.rate_limit_delay = 0.05  # Reduced delay for faster processing (was 0.1)
+        self.normalization_cache = {}
+        self._spacy_models = {}
+        self._spacy_download_attempted = set()
+
+    def normalize_word_form(self, word: str, language: str) -> str:
+        """
+        Public helper that returns a normalized (typically infinitive) form for the word.
+        Falls back to the original word if normalization fails.
+        """
+        if not word:
+            return word
+        language = (language or "en").lower()
+        normalized = self._normalize_word_form(word.strip().lower(), language)
+        return normalized or word.strip().lower()
     
     def get_word_info(self, word: str, language: str, target_language: str = "en") -> Dict:
         """
@@ -26,14 +41,25 @@ class DictionaryService:
         Returns:
             Dictionary with definition, translation, grammar info, etc.
         """
-        word_lower = word.lower().strip()
-        cache_key = f"{word_lower}_{language}_{target_language}"
+        word_clean = (word or "").strip()
+        language = (language or "en").lower()
+        target_language = (target_language or "en").lower()
+        word_lower = word_clean.lower()
+        normalized_word = self._normalize_word_form(word_lower, language)
+        lookup_word = normalized_word or word_lower
+        cache_key = f"{lookup_word}_{language}_{target_language}"
         
         if cache_key in self.cache:
-            return self.cache[cache_key]
+            cached = dict(self.cache[cache_key])
+            cached['word'] = word_clean or lookup_word
+            cached['normalized_word'] = lookup_word
+            cached['normalization_applied'] = lookup_word != word_lower
+            return cached
         
         result = {
-            'word': word,
+            'word': word_clean or lookup_word,
+            'normalized_word': lookup_word,
+            'normalization_applied': lookup_word != word_lower,
             'definition': '',
             'translation': '',
             'part_of_speech': '',
@@ -44,15 +70,233 @@ class DictionaryService:
         
         # Try different dictionary sources based on language
         if language == 'en':
-            result = self._get_english_definition(word_lower, result)
+            result = self._get_english_definition(lookup_word, result)
         elif language in ['it', 'es', 'fr', 'de', 'pt']:
-            result = self._get_romance_language_info(word_lower, language, target_language, result)
+            result = self._get_romance_language_info(lookup_word, language, target_language, result, original_word=word_lower)
         else:
             # Generic fallback
-            result = self._get_generic_translation(word_lower, language, target_language, result)
+            result = self._get_generic_translation(lookup_word, language, target_language, result)
         
-        self.cache[cache_key] = result
+        self.cache[cache_key] = dict(result)
         return result
+    
+    def _normalize_word_form(self, word: str, language: str) -> str:
+        """
+        Attempt to normalize a word to its lemma/infinitive form.
+        Uses spaCy when available, with heuristic fallbacks for Italian verbs with clitics.
+        """
+        if not word:
+            return word
+        cache_key = f"{language}:{word}"
+        if cache_key in self.normalization_cache:
+            return self.normalization_cache[cache_key]
+        
+        normalized = word
+        nlp = self._get_spacy_model(language)
+        if nlp:
+            try:
+                doc = nlp(word)
+                if len(doc) > 0:
+                    lemma = doc[0].lemma_.strip()
+                    if lemma and lemma != '-PRON-':
+                        normalized = lemma.lower()
+            except Exception:
+                pass
+        
+        if language == 'it':
+            normalized = self._normalize_italian_word_form(word, normalized)
+        
+        self.normalization_cache[cache_key] = normalized
+        return normalized
+    
+    def _get_spacy_model(self, language: str):
+        """Lazily load and cache spaCy models per language."""
+        if language in self._spacy_models:
+            return self._spacy_models[language]
+        
+        try:
+            import spacy
+        except ImportError:
+            self._spacy_models[language] = None
+            return None
+        
+        model_map = {
+            'en': 'en_core_web_sm',
+            'it': 'it_core_news_sm',
+            'es': 'es_core_news_sm',
+            'fr': 'fr_core_news_sm',
+            'de': 'de_core_news_sm',
+            'pt': 'pt_core_news_sm'
+        }
+        model_name = model_map.get(language, 'en_core_web_sm')
+        
+        if model_name in self._spacy_download_attempted:
+            # Avoid repeated download attempts
+            try:
+                nlp = spacy.load(model_name)
+            except Exception:
+                nlp = None
+            self._spacy_models[language] = nlp
+            return nlp
+        
+        try:
+            nlp = spacy.load(model_name)
+            self._spacy_models[language] = nlp
+            return nlp
+        except OSError:
+            # Try downloading the model once
+            self._spacy_download_attempted.add(model_name)
+            try:
+                from spacy.cli import download
+                download(model_name)
+                nlp = spacy.load(model_name)
+            except Exception:
+                nlp = None
+        except Exception:
+            nlp = None
+        
+        self._spacy_models[language] = nlp
+        return nlp
+    
+    def _normalize_italian_word_form(self, original_word: str, current_normalized: str) -> str:
+        """
+        Handle common Italian verb contractions (clitics) and reflexive infinitives.
+        Only applies transformations if the candidate clearly looks like an infinitive.
+        """
+        word = original_word or current_normalized
+        if not word:
+            return current_normalized
+        
+        # If spaCy already produced an infinitive, keep it
+        if self._looks_like_infinitive(current_normalized):
+            return current_normalized
+        
+        lower_word = word.lower().replace("’", "").replace("'", "")
+        candidate = current_normalized
+        
+        clitic_candidate = self._strip_italian_clitic(lower_word)
+        if clitic_candidate and clitic_candidate != candidate:
+            candidate = clitic_candidate
+        
+        return candidate
+    
+    def _strip_italian_clitic(self, word: str) -> Optional[str]:
+        """Remove Italian clitic pronouns from the end of a word to recover the infinitive."""
+        if not word or len(word) < 4:
+            return None
+        
+        suffixes = [
+            'gliene', 'gliela', 'glielo', 'glieli', 'gliele',
+            'mene', 'tene', 'cene', 'vene',
+            'mele', 'mela', 'melo', 'meli',
+            'tele', 'tela', 'telo', 'teli',
+            'cele', 'cela', 'celo', 'celi',
+            'gli', 'la', 'le', 'li', 'lo',
+            'mi', 'ti', 'si', 'ci', 'vi', 'ne'
+        ]
+        suffixes.sort(key=len, reverse=True)
+        
+        for suffix in suffixes:
+            if not word.endswith(suffix):
+                continue
+            stem = word[:-len(suffix)]
+            if len(stem) < 3:
+                continue
+            
+            # Cases like "conoscerla" -> "conoscere"
+            if stem.endswith('r'):
+                candidate = f"{stem}e"
+                if self._looks_like_infinitive(candidate):
+                    return candidate
+            
+            # Cases like "circondati" -> "circondare"
+            if stem[-1] in 'aeiou':
+                candidate = f"{stem}re"
+                if self._looks_like_infinitive(candidate):
+                    return candidate
+            
+            # Reflexive infinitives like "guardarsi"
+            if stem.endswith(('ar', 'er', 'ir')):
+                candidate = f"{stem}e"
+                if self._looks_like_infinitive(candidate):
+                    return candidate
+        
+        # Handle explicit reflexive infinitives ("chiamarsi")
+        if word.endswith(('arsi', 'ersi', 'irsi')) and len(word) > 5:
+            stem = word[:-2]  # remove 'si'
+            if stem.endswith('r'):
+                candidate = f"{stem}e"
+            else:
+                candidate = f"{stem}re"
+            if self._looks_like_infinitive(candidate):
+                return candidate
+        
+        return None
+    
+    def _looks_like_infinitive(self, word: str) -> bool:
+        """Check if a word looks like an Italian infinitive."""
+        if not word:
+            return False
+        return word.endswith(('are', 'ere', 'ire'))
+    
+    def _clean_translation_text(self, text: str) -> str:
+        """Standardize translation strings (remove stray punctuation, collapse whitespace)."""
+        if not text:
+            return ''
+        cleaned = re.sub(r'\s+', ' ', text).strip()
+        cleaned = cleaned.strip('[]')
+        cleaned = cleaned.rstrip('?!.,;:').strip()
+        return cleaned
+    
+    def _has_new_translation(self, result: Dict, previous: str) -> bool:
+        """Check if result now contains a new translation compared to the previous value."""
+        translation = (result.get('translation') or '').strip()
+        prev = (previous or '').strip()
+        return bool(translation) and translation != prev
+    
+    def _lookup_translation(self, word: str, source_lang: str, target_lang: str, result: Dict) -> bool:
+        """Try dictionary + API translation sources for a single word."""
+        if not word:
+            return False
+        
+        previous_translation = result.get('translation', '')
+        if source_lang == 'it' and target_lang == 'en':
+            result = self._get_italian_english_dict(word, result)
+            if self._has_new_translation(result, previous_translation):
+                return True
+            previous_translation = result.get('translation', '')
+        
+        translation = self._query_mymemory(word, source_lang, target_lang)
+        if translation:
+            result['translation'] = translation
+            result['definition'] = translation
+            result['source'] = 'mymemory'
+            return True
+        
+        return False
+    
+    def _query_mymemory(self, word: str, source_lang: str, target_lang: str) -> Optional[str]:
+        """Query MyMemory translation API and return a cleaned translation if available."""
+        try:
+            time.sleep(self.rate_limit_delay)
+            if source_lang == target_lang:
+                return None
+            response = requests.get(
+                "https://api.mymemory.translated.net/get",
+                params={'q': word, 'langpair': f"{source_lang}|{target_lang}"},
+                timeout=5
+            )
+            if response.status_code == 200:
+                data = response.json()
+                translation = data.get('responseData', {}).get('translatedText')
+                translation = self._clean_translation_text(translation)
+                if (translation and
+                    translation.lower() != word.lower() and
+                    not translation.startswith('[')):
+                    return translation
+        except Exception as e:
+            print(f"Translation API error for {word}: {e}")
+        return None
     
     def _get_english_definition(self, word: str, result: Dict) -> Dict:
         """Get English word definition using Free Dictionary API."""
@@ -94,51 +338,33 @@ class DictionaryService:
         
         return result
     
-    def _get_romance_language_info(self, word: str, source_lang: str, target_lang: str, result: Dict) -> Dict:
+    def _get_romance_language_info(self, word: str, source_lang: str, target_lang: str, result: Dict, original_word: Optional[str] = None) -> Dict:
         """Get information for Romance languages (Italian, Spanish, French, etc.)."""
-        # For Italian, try multiple dictionary sources
-        if source_lang == 'it' and target_lang == 'en':
-            # Try Italian-specific dictionary sources first
-            result = self._get_italian_english_dict(word, result)
-            if result.get('translation'):
+        translation_found = False
+        candidates = []
+        if word:
+            candidates.append(word)
+        if original_word and original_word not in candidates:
+            candidates.append(original_word)
+        
+        for candidate in candidates:
+            if self._lookup_translation(candidate, source_lang, target_lang, result):
                 translation_found = True
-            else:
-                translation_found = False
-        else:
-            translation_found = False
+                result['matched_word'] = candidate
+                break
         
-        # Try MyMemory Translation API for translations (if not already found)
         if not translation_found:
-            try:
-                time.sleep(self.rate_limit_delay)
-                if source_lang != target_lang:
-                    response = requests.get(
-                        f"https://api.mymemory.translated.net/get?q={word}&langpair={source_lang}|{target_lang}",
-                        timeout=5
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        if 'responseData' in data and 'translatedText' in data['responseData']:
-                            translation = data['responseData']['translatedText']
-                            # Validate translation quality (not just the same word, not empty)
-                            if (translation and 
-                                translation.lower() != word.lower() and 
-                                len(translation.strip()) > 0 and
-                                not translation.startswith('[')):  # Skip API error messages
-                                result['translation'] = translation.strip()
-                                result['definition'] = translation.strip()
-                                result['source'] = 'mymemory'
-                                translation_found = True
-            except Exception as e:
-                print(f"Translation API error for {word}: {e}")
-        
-        # If no translation found, try fallback dictionary
-        if not translation_found:
-            result = self._get_fallback_translation(word, source_lang, target_lang, result)
+            for fallback_word in candidates:
+                previous_translation = result.get('translation', '')
+                result = self._get_fallback_translation(fallback_word, source_lang, target_lang, result)
+                if self._has_new_translation(result, previous_translation):
+                    translation_found = True
+                    result['matched_word'] = fallback_word
+                    break
         
         # Always try to infer grammar from word endings (language-specific)
-        grammar_info = self._analyze_romance_grammar(word, source_lang)
+        grammar_source = original_word or word
+        grammar_info = self._analyze_romance_grammar(grammar_source, source_lang)
         result['grammar'] = grammar_info
         
         # Ensure we have a part of speech
@@ -311,17 +537,19 @@ class DictionaryService:
             try:
                 time.sleep(self.rate_limit_delay)
                 response = requests.get(
-                    f"https://api.mymemory.translated.net/get?q={word}&langpair={source_lang}|{target_lang}",
+                    "https://api.mymemory.translated.net/get",
+                    params={'q': word, 'langpair': f"{source_lang}|{target_lang}"},
                     timeout=5
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
                     if 'responseData' in data and 'translatedText' in data['responseData']:
-                        translation = data['responseData']['translatedText']
-                        result['translation'] = translation
-                        result['definition'] = translation
-                        result['source'] = 'mymemory'
+                        translation = self._clean_translation_text(data['responseData']['translatedText'])
+                        if translation:
+                            result['translation'] = translation
+                            result['definition'] = translation
+                            result['source'] = 'mymemory'
             except Exception as e:
                 print(f"Translation error for {word}: {e}")
         
@@ -342,13 +570,12 @@ class DictionaryService:
             )
             if response.status_code == 200:
                 # Parse HTML to extract translation (basic extraction)
-                import re
                 html = response.text
                 # Look for translation patterns in WordReference HTML
                 # This is a simple extraction - could be improved
                 translation_match = re.search(r'<td class="ToWrd">([^<]+)</td>', html)
                 if translation_match:
-                    translation = translation_match.group(1).strip()
+                    translation = self._clean_translation_text(translation_match.group(1))
                     if translation and translation.lower() != word_lower:
                         result['translation'] = translation
                         result['definition'] = translation
@@ -413,7 +640,7 @@ class DictionaryService:
                         if response.status_code == 200:
                             data = response.json()
                             if 'translatedText' in data:
-                                translation = data['translatedText'].strip()
+                                translation = self._clean_translation_text(data['translatedText'])
                                 if translation and translation.lower() != word.lower():
                                     result['translation'] = translation
                                     result['definition'] = translation

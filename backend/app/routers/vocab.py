@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional, Tuple, Any, Dict
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, distinct
+from sqlalchemy import desc, func, distinct, or_
 import sys
 sys.path.append('..')
 from database import get_db
@@ -15,6 +15,8 @@ dictionary_service = DictionaryService()
 MORPHOLOGY_EXCLUDE_KEYS = {
     'forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'
 }
+STATUS_LEARNED_VALUES = {"learned", "known", "mastered"}
+STATUS_UNKNOWN_VALUES = {"unknown", "learning", "new"}
 
 
 def _has_substantive_grammar(morphology: Any) -> bool:
@@ -83,6 +85,35 @@ def _enrich_lemma_if_needed(lemma: Lemma) -> Tuple[str, dict, str, bool]:
 
     return definition or "", morphology, pos or "", updated
 
+
+def _normalize_status_value(status: Optional[str]) -> str:
+    if not status:
+        return "unknown"
+    status_lower = status.lower()
+    if status_lower in STATUS_LEARNED_VALUES:
+        return "learned"
+    if status_lower in STATUS_UNKNOWN_VALUES:
+        return "unknown"
+    if status_lower == "ignored":
+        return "ignored"
+    return "unknown"
+
+
+def _build_status_filter_clause(status_column, desired_status: Optional[str]):
+    if not desired_status:
+        return None
+    if desired_status == "learned":
+        return status_column.in_(list(STATUS_LEARNED_VALUES))
+    if desired_status == "ignored":
+        return status_column == "ignored"
+    if desired_status == "unknown":
+        return or_(
+            status_column.is_(None),
+            status_column.in_(list(STATUS_UNKNOWN_VALUES))
+        )
+    return None
+
+
 class LemmaResponse(BaseModel):
     id: int
     lemma: str
@@ -96,7 +127,7 @@ class VocabularyItem(BaseModel):
     lemma: LemmaResponse
     frequency_in_book: int
     difficulty_estimate: float
-    status: str  # known, learning, unknown, ignored
+    status: str  # learned, unknown, ignored
     example_sentences: List[str]
     collocations: List[str]
 
@@ -115,7 +146,7 @@ async def get_book_vocabulary(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     sort_by: str = Query("frequency", regex="^(frequency|alphabetical|chronological)$"),
-    filter_status: Optional[str] = Query(None, regex="^(known|learning|unknown|ignored)$"),
+    filter_status: Optional[str] = Query(None, regex="^(learned|known|learning|unknown|ignored)$"),
     chapter: Optional[int] = Query(None, ge=0),
     db: Session = Depends(get_db)
 ):
@@ -129,21 +160,24 @@ async def get_book_vocabulary(
     # This will return empty if processing hasn't created tokens yet, which is fine
     # Vocabulary appears incrementally as batches are committed
     
-    # Use subquery to get distinct lemma IDs first, then join back to Lemma
-    # This avoids PostgreSQL DISTINCT ON ordering restrictions
-    
-    # Build subquery for distinct lemma IDs
+    user_id = 1  # TODO: Get from auth context
+
     lemma_ids_subquery = db.query(Token.lemma_id).filter(Token.book_id == book_id)
     if chapter is not None:
         lemma_ids_subquery = lemma_ids_subquery.filter(Token.chapter == chapter)
     lemma_ids_subquery = lemma_ids_subquery.distinct().subquery()
     
-    # Join back to Lemma table and apply sorting
-    query = db.query(Lemma).join(
+    status_subquery = db.query(
+        UserVocabStatus.lemma_id.label("lemma_id"),
+        UserVocabStatus.status.label("status")
+    ).filter(UserVocabStatus.user_id == user_id).subquery()
+    
+    query = db.query(Lemma, status_subquery.c.status.label("user_status")).join(
         lemma_ids_subquery, Lemma.id == lemma_ids_subquery.c.lemma_id
+    ).outerjoin(
+        status_subquery, Lemma.id == status_subquery.c.lemma_id
     )
     
-    # Apply sorting
     if sort_by == "frequency":
         query = query.order_by(desc(Lemma.global_frequency))
     elif sort_by == "alphabetical":
@@ -151,40 +185,49 @@ async def get_book_vocabulary(
     else:  # chronological (by lemma ID, which reflects insertion order)
         query = query.order_by(desc(Lemma.id))
     
-    # Get total count before pagination - use separate query to avoid JSON column issues
-    # Count distinct lemma IDs directly
-    count_query = db.query(func.count(distinct(Lemma.id))).join(Token).filter(Token.book_id == book_id)
+    normalized_filter_status = _normalize_status_value(filter_status) if filter_status else None
+    filter_clause = _build_status_filter_clause(status_subquery.c.status, normalized_filter_status)
+    if filter_clause is not None:
+        query = query.filter(filter_clause)
+    
+    count_query = db.query(func.count(distinct(Lemma.id))).join(
+        Token, Token.lemma_id == Lemma.id
+    ).filter(Token.book_id == book_id)
     if chapter is not None:
         count_query = count_query.filter(Token.chapter == chapter)
+    count_query = count_query.outerjoin(
+        status_subquery, Lemma.id == status_subquery.c.lemma_id
+    )
+    if filter_clause is not None:
+        count_query = count_query.filter(filter_clause)
     total_count = count_query.scalar() or 0
     
-    # THEN apply limit and offset
     query = query.limit(limit).offset((page - 1) * limit)
     
-    lemmas = query.all()
+    lemmas_with_status = query.all()
     
-    # Convert to response format
     vocabulary = []
-    # Get user_id from context (default to 1 for now)
-    user_id = 1  # TODO: Get from auth context
+    
+    lemma_ids = [lemma.id for lemma, _ in lemmas_with_status]
+    frequency_map: Dict[int, int] = {}
+    if lemma_ids:
+        freq_results = db.query(
+            Token.lemma_id,
+            func.count(Token.id).label("frequency")
+        ).filter(
+            Token.book_id == book_id,
+            Token.lemma_id.in_(lemma_ids)
+        ).group_by(Token.lemma_id).all()
+        frequency_map = {lemma_id: frequency for lemma_id, frequency in freq_results}
     
     lemmas_updated = False
-    for lemma in lemmas:
+    for lemma, user_status_value in lemmas_with_status:
         definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma)
         if updated:
             lemmas_updated = True
 
-        # Get user status (for now, default to unknown)
-        user_status = db.query(UserVocabStatus).filter(
-            UserVocabStatus.lemma_id == lemma.id,
-            UserVocabStatus.user_id == user_id
-        ).first()
-        
-        # Count frequency in this specific book
-        frequency_in_book = db.query(Token).filter(
-            Token.lemma_id == lemma.id,
-            Token.book_id == book_id
-        ).count()
+        normalized_status = _normalize_status_value(user_status_value)
+        frequency_in_book = frequency_map.get(lemma.id, 0)
         
         vocabulary_item = VocabularyItem(
             lemma=LemmaResponse(
@@ -197,10 +240,10 @@ async def get_book_vocabulary(
                 global_frequency=lemma.global_frequency or 0.0
             ),
             frequency_in_book=frequency_in_book,
-            difficulty_estimate=0.0,  # Remove difficulty
-            status=user_status.status if user_status else "unknown",
-            example_sentences=[],  # TODO: Add example sentences
-            collocations=[]  # TODO: Add collocations
+            difficulty_estimate=0.0,
+            status=normalized_status,
+            example_sentences=[],
+            collocations=[]
         )
         vocabulary.append(vocabulary_item)
     
@@ -218,7 +261,7 @@ async def get_book_vocabulary(
         page=page,
         limit=limit,
         sort_by=sort_by,
-        filter_status=filter_status
+        filter_status=normalized_filter_status
     )
 
 @router.get("/lemma/{lemma_id}")
@@ -230,6 +273,7 @@ async def get_lemma_details(lemma_id: int, db: Session = Depends(get_db)):
     user_status = db.query(UserVocabStatus).filter(
         UserVocabStatus.lemma_id == lemma_id
     ).first()
+    normalized_status = _normalize_status_value(user_status.status if user_status else None)
     
     return {
         "lemma": {
@@ -242,7 +286,7 @@ async def get_lemma_details(lemma_id: int, db: Session = Depends(get_db)):
             "global_frequency": lemma.global_frequency or 0.0
         },
         "frequency_in_book": int(lemma.global_frequency),
-        "status": user_status.status if user_status else "unknown",
+        "status": normalized_status,
         "example_sentences": [],
         "collocations": []
     }
@@ -259,7 +303,13 @@ async def update_vocab_status(
     if not lemma:
         raise HTTPException(status_code=404, detail="Lemma not found")
     
-    status = status_data.get("status", "unknown")
+    status_input = status_data.get("status", "unknown")
+    status_lower = (status_input or "").lower()
+    allowed_status_inputs = STATUS_LEARNED_VALUES.union(STATUS_UNKNOWN_VALUES).union({"ignored", ""})
+    if status_lower not in allowed_status_inputs:
+        raise HTTPException(status_code=400, detail="Invalid status value")
+    status = status_input or "unknown"
+    normalized_status = _normalize_status_value(status)
     user_id = current_user.get("user_id", 1)
     
     # Update or create user vocabulary status
@@ -269,12 +319,12 @@ async def update_vocab_status(
     ).first()
     
     if user_status:
-        user_status.status = status
+        user_status.status = normalized_status
     else:
         user_status = UserVocabStatus(
             lemma_id=lemma_id,
             user_id=user_id,
-            status=status
+            status=normalized_status
         )
         db.add(user_status)
     
@@ -283,7 +333,7 @@ async def update_vocab_status(
     return {
         "lemma_id": lemma_id,
         "user_id": user_id,
-        "status": status,
+        "status": normalized_status,
         "updated": True
     }
 
@@ -341,6 +391,7 @@ async def search_vocabulary(
         user_status = db.query(UserVocabStatus).filter(
             UserVocabStatus.lemma_id == lemma.id
         ).first()
+        normalized_status = _normalize_status_value(user_status.status if user_status else None)
         
         vocabulary_item = VocabularyItem(
             lemma=LemmaResponse(
@@ -354,7 +405,7 @@ async def search_vocabulary(
             ),
             frequency_in_book=int(lemma.global_frequency or 0),
             difficulty_estimate=0.0,
-            status=user_status.status if user_status else "unknown",
+            status=normalized_status,
             example_sentences=[],
             collocations=[]
         )

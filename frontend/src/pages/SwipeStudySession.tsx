@@ -20,7 +20,7 @@ interface VocabularyItem {
   lemma: Lemma;
   frequency_in_book: number;
   difficulty_estimate: number;
-  status: 'known' | 'learning' | 'unknown' | 'ignored';
+  status: 'learned' | 'unknown' | 'ignored';
   example_sentences: string[];
   collocations: string[];
 }
@@ -86,49 +86,42 @@ const SwipeStudySession: React.FC = () => {
   }, []);
 
   const loadVocabulary = async () => {
+    if (!bookId || !token) return;
     try {
       setLoading(true);
-      
-      // Fetch all vocabulary by paginating through all pages
-      let allVocabulary: VocabularyItem[] = [];
-      let page = 1;
-      const limit = 100; // Maximum allowed
-      let hasMore = true;
-      
-      while (hasMore) {
-        const response = await apiGet(`/vocab/book/${bookId}?page=${page}&limit=${limit}`, token);
+      const MAX_SESSION_WORDS = 200;
+      const limit = 100; // API maximum
+      const buildEndpoint = (pageNumber: number) => 
+        `/vocab/book/${bookId}?page=${pageNumber}&limit=${limit}&sort_by=frequency&filter_status=unknown`;
+      const fetchPage = async (pageNumber: number) => {
+        const response = await apiGet(buildEndpoint(pageNumber), token);
         if (!response.ok) {
           throw new Error('Failed to load vocabulary');
         }
-        const data = await response.json();
-        const vocabulary = data.vocabulary || [];
-        
-        if (vocabulary.length === 0) {
-          hasMore = false;
-        } else {
-          allVocabulary = [...allVocabulary, ...vocabulary];
-          // Check if we've loaded all pages
-          if (vocabulary.length < limit || allVocabulary.length >= data.total_count) {
-            hasMore = false;
-          } else {
-            page++;
-          }
-        }
+        return response.json();
+      };
+
+      const firstPage = await fetchPage(1);
+      let allVocabulary: VocabularyItem[] = firstPage.vocabulary || [];
+      const totalCount = firstPage.total_count || allVocabulary.length;
+      const desiredCount = Math.min(totalCount, MAX_SESSION_WORDS);
+      const effectiveCount = desiredCount > 0 ? desiredCount : allVocabulary.length;
+      const pagesNeeded = Math.max(1, Math.ceil(Math.min(effectiveCount || limit, MAX_SESSION_WORDS) / limit));
+
+      if (pagesNeeded > 1) {
+        const remainingPages = Array.from({ length: pagesNeeded - 1 }, (_, idx) => idx + 2);
+        const pageData = await Promise.all(remainingPages.map(page => fetchPage(page)));
+        pageData.forEach(page => {
+          allVocabulary = allVocabulary.concat(page.vocabulary || []);
+        });
       }
-      
-      console.log(`Loaded ${allVocabulary.length} vocabulary words from ${page} page(s)`);
-      
-      // Show all words initially (don't filter by status)
-      // Users can mark words as known/ignored during study
+
+      const targetCount = effectiveCount || 0;
       const studyWords = allVocabulary
-        .filter((item: VocabularyItem) => {
-          // Only filter out explicitly ignored words, show everything else
-          return item.status !== 'ignored';
-        })
+        .filter((item: VocabularyItem) => item.status !== 'ignored')
+        .slice(0, targetCount)
         .sort(() => Math.random() - 0.5);
-      
-      console.log(`After filtering: ${studyWords.length} words available for study`);
-      
+
       setWords(studyWords);
       setCurrentIndex(0);
       setShowTranslation(false);
@@ -207,13 +200,13 @@ const SwipeStudySession: React.FC = () => {
     const { x, y } = currentDragDelta.current;
     const threshold = 100;
     
-    // Swipe right (known)
+    // Swipe right (learned)
     if (x > threshold) {
-      handleSwipe('known');
+      handleSwipe('learned');
     }
-    // Swipe left (learning)
+    // Swipe left (unknown)
     else if (x < -threshold) {
-      handleSwipe('learning');
+      handleSwipe('unknown');
     }
     // Swipe up (show translation) - already handled in handleMove
     else if (y < -threshold) {
@@ -229,7 +222,7 @@ const SwipeStudySession: React.FC = () => {
     currentDragDelta.current = { x: 0, y: 0 };
   };
 
-  const handleSwipe = async (status: 'known' | 'learning') => {
+  const handleSwipe = async (status: 'learned' | 'unknown') => {
     if (currentIndex >= words.length) return;
     
     const currentWord = words[currentIndex];
@@ -648,17 +641,17 @@ const SwipeStudySession: React.FC = () => {
       <div className="fixed bottom-0 left-0 right-0 z-20 bg-white/90 backdrop-blur-md border-t border-gray-200">
         <div className="max-w-md mx-auto px-4 py-4">
           <div className="flex items-center justify-center gap-6">
+              <button
+                onClick={() => handleSwipe('unknown')}
+                className="w-16 h-16 bg-orange-500 rounded-full shadow-lg flex items-center justify-center text-white text-2xl hover:scale-110 transition-transform"
+                aria-label="Mark as Unknown"
+              >
+                ?
+              </button>
             <button
-              onClick={() => handleSwipe('learning')}
-              className="w-16 h-16 bg-orange-500 rounded-full shadow-lg flex items-center justify-center text-white text-2xl hover:scale-110 transition-transform"
-              aria-label="Still Learning"
-            >
-              ?
-            </button>
-            <button
-              onClick={() => handleSwipe('known')}
+                onClick={() => handleSwipe('learned')}
               className="w-16 h-16 bg-green-500 rounded-full shadow-lg flex items-center justify-center text-white text-2xl hover:scale-110 transition-transform"
-              aria-label="I Know This"
+                aria-label="Mark as Learned"
             >
               ✓
             </button>

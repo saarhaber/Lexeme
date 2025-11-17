@@ -19,7 +19,7 @@ interface VocabularyItem {
   lemma: Lemma;
   frequency_in_book: number;
   difficulty_estimate: number;
-  status: 'known' | 'learning' | 'unknown' | 'ignored';
+  status: 'learned' | 'unknown' | 'ignored';
   example_sentences: string[];
   collocations: string[];
 }
@@ -121,56 +121,54 @@ const StudySession: React.FC = () => {
     if (!token) return;
     try {
       setLoading(true);
-      
-      // Fetch all vocabulary by paginating through all pages
-      let allVocabulary: VocabularyItem[] = [];
-      let page = 1;
-      const limit = 100; // Maximum allowed per page
-      let hasMore = true;
-      
-        while (hasMore) {
-          let endpoint = `/vocab/book/${bookId}?page=${page}&limit=${limit}`;
-          if (selectedChapter !== null) {
-            endpoint += `&chapter=${selectedChapter}`;
-          }
-          
-          const response = await apiGet(endpoint, token);
-          
-          if (!response.ok) {
-            throw new Error(`Failed to load vocabulary: ${response.status} ${response.statusText}`);
-          }
-          
-          const data = await response.json();
-        const vocabulary = data.vocabulary || [];
-        
-        if (vocabulary.length === 0) {
-          hasMore = false;
-        } else {
-          allVocabulary = [...allVocabulary, ...vocabulary];
-          // Check if we've loaded all pages
-          if (vocabulary.length < limit || allVocabulary.length >= data.total_count) {
-            hasMore = false;
-          } else {
-            page++;
-          }
+      const MAX_SESSION_WORDS = 200;
+      const limit = 100;
+      const buildEndpoint = (pageNumber: number) => {
+        let endpoint = `/vocab/book/${bookId}?page=${pageNumber}&limit=${limit}&sort_by=frequency&filter_status=unknown`;
+        if (selectedChapter !== null) {
+          endpoint += `&chapter=${selectedChapter}`;
         }
+        return endpoint;
+      };
+      const fetchPage = async (pageNumber: number) => {
+        const response = await apiGet(buildEndpoint(pageNumber), token);
+        if (!response.ok) {
+          throw new Error(`Failed to load vocabulary: ${response.status} ${response.statusText}`);
+        }
+        return response.json();
+      };
+
+      const firstPage = await fetchPage(1);
+      let allVocabulary: VocabularyItem[] = firstPage.vocabulary || [];
+      const totalCount = firstPage.total_count || allVocabulary.length;
+      const desiredCount = Math.min(totalCount, MAX_SESSION_WORDS);
+      const effectiveCount = desiredCount > 0 ? desiredCount : allVocabulary.length;
+      const pagesNeeded = Math.max(1, Math.ceil(Math.min(effectiveCount || limit, MAX_SESSION_WORDS) / limit));
+
+      if (pagesNeeded > 1) {
+        const remainingPages = Array.from({ length: pagesNeeded - 1 }, (_, idx) => idx + 2);
+        const pageData = await Promise.all(remainingPages.map(page => fetchPage(page)));
+        pageData.forEach(page => {
+          allVocabulary = allVocabulary.concat(page.vocabulary || []);
+        });
       }
-      
-      console.log(`Loaded ${allVocabulary.length} vocabulary words from ${page} page(s)`);
-      
-      // Convert vocabulary items to study cards
-      const studyCards: StudyCard[] = allVocabulary
-        .filter((item: VocabularyItem) => item.status !== 'known' && item.status !== 'ignored')
-        .map((item: VocabularyItem) => ({
-          id: item.lemma.id,
-          word: item.lemma.lemma,
-          definition: item.lemma.definition || `${item.lemma.pos} word`,
-          difficulty: item.difficulty_estimate,
-          frequency: item.frequency_in_book,
-          pos: item.lemma.pos,
-          examples: item.example_sentences.slice(0, 2),
-          isFlipped: false
-        }));
+
+      const targetCount = effectiveCount || 0;
+      const filteredVocabulary = allVocabulary
+        .filter((item: VocabularyItem) => item.status !== 'learned' && item.status !== 'ignored')
+        .slice(0, targetCount)
+        .sort(() => Math.random() - 0.5);
+
+      const studyCards: StudyCard[] = filteredVocabulary.map((item: VocabularyItem) => ({
+        id: item.lemma.id,
+        word: item.lemma.lemma,
+        definition: item.lemma.definition || `${item.lemma.pos} word`,
+        difficulty: item.difficulty_estimate,
+        frequency: item.frequency_in_book,
+        pos: item.lemma.pos,
+        examples: item.example_sentences.slice(0, 2),
+        isFlipped: false
+      }));
       
       setCards(studyCards);
       setCurrentCardIndex(0);
@@ -215,12 +213,11 @@ const StudySession: React.FC = () => {
       setCorrectAnswers(prev => prev + 1);
     }
     
-    // Update word status in backend
     const currentCard = cards[currentCardIndex];
-    const newStatus = answer === 'correct' ? 'known' : 'learning';
+    const newStatus = answer === 'correct' ? 'learned' : 'unknown';
     
     try {
-        await apiPut(`/vocab/status/${currentCard.id}`, { status: newStatus }, token);
+      await apiPut(`/vocab/status/${currentCard.id}`, { status: newStatus }, token);
     } catch (error) {
       console.error('Failed to update word status:', error);
     }

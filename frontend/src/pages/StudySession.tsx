@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import SkeletonCard from '../components/SkeletonCard';
 import ProgressIndicator from '../components/ProgressIndicator';
-import { API_BASE_URL } from '../config/api';
+import { useAuth } from '../contexts/AuthContext';
+import { apiGet, apiPut } from '../utils/api';
 
 interface Lemma {
   id: number;
@@ -39,6 +40,7 @@ type StudyMode = 'flashcards' | 'multiple-choice' | 'typing';
 const StudySession: React.FC = () => {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
+  const { token } = useAuth();
   
   const [studyMode, setStudyMode] = useState<StudyMode>('flashcards');
   const [cards, setCards] = useState<StudyCard[]>([]);
@@ -60,19 +62,21 @@ const StudySession: React.FC = () => {
   // Fetch user's books
   useEffect(() => {
     const fetchBooks = async () => {
+      if (!token) return;
       try {
-        const response = await fetch(`${API_BASE_URL}/books`);
-        if (response.ok) {
-          const data = await response.json();
-          setBooks(data);
-          if (data.length > 0) {
-            const firstBookId = data[0].id;
-            setSelectedBook(firstBookId);
-            if (bookId) {
-              const book = data.find((b: any) => b.id === parseInt(bookId));
-              if (book) {
-                setSelectedBook(book.id);
-              }
+        const response = await apiGet('/books/', token);
+        if (!response.ok) {
+          throw new Error('Failed to fetch books');
+        }
+        const data = await response.json();
+        setBooks(data);
+        if (data.length > 0) {
+          const firstBookId = data[0].id;
+          setSelectedBook(firstBookId);
+          if (bookId) {
+            const book = data.find((b: any) => b.id === parseInt(bookId));
+            if (book) {
+              setSelectedBook(book.id);
             }
           }
         }
@@ -82,37 +86,39 @@ const StudySession: React.FC = () => {
     };
 
     fetchBooks();
-  }, [bookId]);
+  }, [bookId, token]);
 
   // Fetch chapters for selected book
   useEffect(() => {
     const fetchChapters = async () => {
-      if (!selectedBook) return;
+      if (!selectedBook || !token) return;
       try {
-        const response = await fetch(`${API_BASE_URL}/vocab/book/${selectedBook}/chapters`);
-        if (response.ok) {
-          const data = await response.json();
-          setChapters(data.chapters || []);
-          setChapterWordCounts(data.chapter_word_counts || {});
-          // Default to "All chapters" (null)
-          setSelectedChapter(null);
+        const response = await apiGet(`/vocab/book/${selectedBook}/chapters`, token);
+        if (!response.ok) {
+          throw new Error('Failed to fetch chapters');
         }
+        const data = await response.json();
+        setChapters(data.chapters || []);
+        setChapterWordCounts(data.chapter_word_counts || {});
+        // Default to "All chapters" (null)
+        setSelectedChapter(null);
       } catch (error) {
         console.error('Failed to fetch chapters:', error);
       }
     };
 
     fetchChapters();
-  }, [selectedBook]);
+  }, [selectedBook, token]);
 
   // Load vocabulary for study
   useEffect(() => {
-    if (selectedBook) {
+    if (selectedBook && token) {
       loadVocabularyForStudy(selectedBook);
     }
-  }, [selectedBook, selectedChapter]);
+  }, [selectedBook, selectedChapter, token]);
 
   const loadVocabularyForStudy = async (bookId: number) => {
+    if (!token) return;
     try {
       setLoading(true);
       
@@ -122,19 +128,19 @@ const StudySession: React.FC = () => {
       const limit = 100; // Maximum allowed per page
       let hasMore = true;
       
-      while (hasMore) {
-        let url = `${API_BASE_URL}/vocab/book/${bookId}?page=${page}&limit=${limit}`;
-        if (selectedChapter !== null) {
-          url += `&chapter=${selectedChapter}`;
-        }
-        
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-          throw new Error(`Failed to load vocabulary: ${response.status} ${response.statusText}`);
-        }
-        
-        const data = await response.json();
+        while (hasMore) {
+          let endpoint = `/vocab/book/${bookId}?page=${page}&limit=${limit}`;
+          if (selectedChapter !== null) {
+            endpoint += `&chapter=${selectedChapter}`;
+          }
+          
+          const response = await apiGet(endpoint, token);
+          
+          if (!response.ok) {
+            throw new Error(`Failed to load vocabulary: ${response.status} ${response.statusText}`);
+          }
+          
+          const data = await response.json();
         const vocabulary = data.vocabulary || [];
         
         if (vocabulary.length === 0) {
@@ -214,11 +220,7 @@ const StudySession: React.FC = () => {
     const newStatus = answer === 'correct' ? 'known' : 'learning';
     
     try {
-      await fetch(`${API_BASE_URL}/vocab/status/${currentCard.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
+        await apiPut(`/vocab/status/${currentCard.id}`, { status: newStatus }, token);
     } catch (error) {
       console.error('Failed to update word status:', error);
     }
@@ -488,27 +490,27 @@ const StudySession: React.FC = () => {
         </div>
       </div>
 
-      {/* Study Card */}
-      <div className="card transition-all duration-300 hover:shadow-lg">
-        <div className="text-center">
-          {studyMode === 'flashcards' && (
-            <div className="animate-fade-in">
-              <div className="mb-6">
-                <div className="text-6xl font-bold text-primary mb-4">
-                  {currentCard.word}
+        {/* Study Card */}
+        <div className="card transition-all duration-300 hover:shadow-lg">
+          <div className="text-center">
+            {studyMode === 'flashcards' && (
+              <div className="animate-fade-in">
+                <div className="mb-6">
+                  <div className="text-4xl sm:text-5xl lg:text-6xl font-bold text-primary mb-4 break-words text-center">
+                    {currentCard.word}
+                  </div>
+                  <div className="text-gray-600 mb-2">
+                    <span className="bg-gray-100 px-2 py-1 rounded text-sm">
+                      {currentCard.pos}
+                    </span>
+                    <span className="ml-2 text-sm">
+                      Difficulty: {Math.round(currentCard.difficulty * 100)}%
+                    </span>
+                    <span className="ml-2 text-sm">
+                      Frequency: {currentCard.frequency}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-gray-600 mb-2">
-                  <span className="bg-gray-100 px-2 py-1 rounded text-sm">
-                    {currentCard.pos}
-                  </span>
-                  <span className="ml-2 text-sm">
-                    Difficulty: {Math.round(currentCard.difficulty * 100)}%
-                  </span>
-                  <span className="ml-2 text-sm">
-                    Frequency: {currentCard.frequency}
-                  </span>
-                </div>
-              </div>
 
               {!showDefinition ? (
                 <button
@@ -566,7 +568,7 @@ const StudySession: React.FC = () => {
                 <h3 className="text-xl font-semibold mb-4">
                   What does this word mean?
                 </h3>
-                <div className="text-3xl font-bold text-primary mb-2">
+                  <div className="text-3xl font-bold text-primary mb-2 break-words text-center">
                   {currentCard.definition}
                 </div>
                 <div className="text-sm text-gray-600">
@@ -603,7 +605,7 @@ const StudySession: React.FC = () => {
                 <h3 className="text-xl font-semibold mb-4">
                   Type the word that means:
                 </h3>
-                <div className="text-2xl font-bold text-primary mb-2">
+                  <div className="text-2xl font-bold text-primary mb-2 break-words text-center">
                   {currentCard.definition}
                 </div>
               </div>

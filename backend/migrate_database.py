@@ -130,33 +130,46 @@ def migrate_database():
             else:
                 print(f"⚠️  Error adding state: {e}")
         
-        # Create reading_progress table
-        try:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS reading_progress (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    book_id INTEGER NOT NULL,
-                    character_position INTEGER DEFAULT 0,
-                    chapter INTEGER DEFAULT 0,
-                    paragraph INTEGER DEFAULT 0,
-                    words_read INTEGER DEFAULT 0,
-                    vocabulary_encountered INTEGER DEFAULT 0,
-                    last_sentence TEXT,
-                    safe_vocabulary_window INTEGER DEFAULT 1000,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME,
-                    FOREIGN KEY (user_id) REFERENCES users(id),
-                    FOREIGN KEY (book_id) REFERENCES books(id)
-                )
-            """))
-            print("✅ Created reading_progress table")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                print("⚠️  reading_progress table already exists")
-            else:
-                print(f"⚠️  Error creating reading_progress table: {e}")
-        
+         # Create reading_progress table
+         try:
+             conn.execute(text("""
+                 CREATE TABLE IF NOT EXISTS reading_progress (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     user_id INTEGER NOT NULL,
+                     book_id INTEGER NOT NULL,
+                     character_position INTEGER DEFAULT 0,
+                     chapter INTEGER DEFAULT 0,
+                     paragraph INTEGER DEFAULT 0,
+                     words_read INTEGER DEFAULT 0,
+                     vocabulary_encountered INTEGER DEFAULT 0,
+                     last_sentence TEXT,
+                     safe_vocabulary_window INTEGER DEFAULT 1000,
+                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                     updated_at DATETIME,
+                     FOREIGN KEY (user_id) REFERENCES users(id),
+                     FOREIGN KEY (book_id) REFERENCES books(id)
+                 )
+             """))
+             print("✅ Created reading_progress table")
+         except Exception as e:
+             if "already exists" in str(e).lower():
+                 print("⚠️  reading_progress table already exists")
+             else:
+                 print(f"⚠️  Error creating reading_progress table: {e}")
+         
+         # Ensure critical indexes exist for performance-sensitive queries
+         index_statements = [
+             ("idx_tokens_book_lemma", "CREATE INDEX IF NOT EXISTS idx_tokens_book_lemma ON tokens(book_id, lemma_id)"),
+             ("idx_tokens_book_chapter", "CREATE INDEX IF NOT EXISTS idx_tokens_book_chapter ON tokens(book_id, chapter)"),
+             ("idx_user_vocab_status_user_lemma", "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_vocab_status_user_lemma ON user_vocab_status(user_id, lemma_id)")
+         ]
+         for index_name, statement in index_statements:
+             try:
+                 conn.execute(text(statement))
+                 print(f"✅ Ensured {index_name} index")
+             except Exception as e:
+                 print(f"⚠️  Error ensuring {index_name}: {e}")
+         
         conn.commit()
         print("\n✅ Database migration completed!")
 

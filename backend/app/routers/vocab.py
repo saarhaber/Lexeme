@@ -1,12 +1,13 @@
+import os
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query, Depends, status
+from fastapi import APIRouter, HTTPException, Query, Depends, status, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional, Tuple, Any, Dict
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, distinct, or_
 import sys
 sys.path.append('..')
-from database import get_db
+from database import get_db, SessionLocal
 from ..models.lemma import Lemma, Token
 from ..models.book import Book
 from ..models.user import User, UserVocabStatus
@@ -15,6 +16,21 @@ from ..utils.security import decode_access_token, oauth2_scheme
 
 router = APIRouter()
 dictionary_service = DictionaryService()
+
+
+def _int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return max(0, int(value))
+    except ValueError:
+        print(f"[Vocab] Invalid value '{value}' for {name}, using default {default}")
+        return default
+
+
+MAX_SYNC_ENRICHMENTS = _int_env("MAX_VOCAB_ENRICH_PER_REQUEST", 25)
+MAX_BACKGROUND_ENRICHMENTS = _int_env("MAX_VOCAB_ENRICH_BACKGROUND", 200)
 
 
 def get_current_user_real(
@@ -73,6 +89,19 @@ def _format_morphology(existing: Any) -> dict:
     if isinstance(existing, dict):
         return dict(existing)
     return {}
+
+
+def _lemma_needs_enrichment(lemma: Lemma) -> bool:
+    definition = (lemma.definition or "").strip()
+    morphology = _format_morphology(lemma.morphology)
+    pos = (lemma.pos or "").strip()
+    if (not definition) or (definition.lower() == lemma.lemma.lower()):
+        return True
+    if not _has_substantive_grammar(morphology):
+        return True
+    if not pos:
+        return True
+    return False
 
 
 def _enrich_lemma_if_needed(lemma: Lemma) -> Tuple[str, dict, str, bool]:
@@ -142,6 +171,26 @@ def _enrich_lemma_if_needed(lemma: Lemma) -> Tuple[str, dict, str, bool]:
         updated = True
 
     return definition or "", morphology, pos or "", updated
+
+
+def _background_enrich_lemmas(lemma_ids: List[int]):
+    if not lemma_ids:
+        return
+    db = SessionLocal()
+    try:
+        lemmas = db.query(Lemma).filter(Lemma.id.in_(lemma_ids)).all()
+        updated = False
+        for lemma in lemmas:
+            _, _, _, changed = _enrich_lemma_if_needed(lemma)
+            if changed:
+                updated = True
+        if updated:
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"[Vocab] Background enrichment failed: {exc}")
+    finally:
+        db.close()
 
 
 def _normalize_status_value(status: Optional[str]) -> str:
@@ -229,19 +278,31 @@ def _build_vocabulary_items(
     lemmas_with_status,
     frequency_map: Dict[int, int],
     enrich_lemmas: bool,
-    db: Session
+    db: Session,
+    max_sync_enrichments: int = 0,
+    max_background_queue: int = 0
 ):
     vocabulary: List[VocabularyItem] = []
     lemmas_updated = False
+    background_queue: List[int] = []
+    sync_enriched = 0
     for lemma, user_status_value in lemmas_with_status:
-        if enrich_lemmas:
-            definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma)
-            if updated:
-                lemmas_updated = True
-        else:
-            definition = (lemma.definition or "").strip()
-            morphology = _format_morphology(lemma.morphology)
-            pos = (lemma.pos or "").strip()
+        definition = (lemma.definition or "").strip()
+        morphology = _format_morphology(lemma.morphology)
+        pos = (lemma.pos or "").strip()
+        updated = False
+
+        if enrich_lemmas and _lemma_needs_enrichment(lemma):
+            if sync_enriched < max_sync_enrichments:
+                definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma)
+                sync_enriched += 1
+            elif len(background_queue) < max_background_queue:
+                background_queue.append(lemma.id)
+        elif not enrich_lemmas:
+            # Keep cached values
+            definition = definition or ""
+            pos = pos or ""
+
         normalized_status = _normalize_status_value(user_status_value)
         frequency_in_book = frequency_map.get(lemma.id, 0)
         
@@ -262,7 +323,9 @@ def _build_vocabulary_items(
             collocations=[]
         )
         vocabulary.append(vocabulary_item)
-    return vocabulary, lemmas_updated
+        if updated:
+            lemmas_updated = True
+    return vocabulary, lemmas_updated, background_queue
 
 @router.get("/book/{book_id}", response_model=VocabularyResponse)
 async def get_book_vocabulary(
@@ -272,6 +335,7 @@ async def get_book_vocabulary(
     sort_by: str = Query("frequency", regex="^(frequency|alphabetical|chronological|random)$"),
     filter_status: Optional[str] = Query(None, regex="^(learned|known|learning|unknown|ignored)$"),
     chapter: Optional[int] = Query(None, ge=0),
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user_real)
 ):
@@ -334,12 +398,19 @@ async def get_book_vocabulary(
     
     lemma_ids = [lemma.id for lemma, _ in lemmas_with_status]
     frequency_map = _build_frequency_map(db, book_id, lemma_ids)
-    vocabulary, lemmas_updated = _build_vocabulary_items(
+    vocabulary, lemmas_updated, pending_background = _build_vocabulary_items(
         lemmas_with_status,
         frequency_map,
         True,
-        db
+        db,
+        max_sync_enrichments=MAX_SYNC_ENRICHMENTS,
+        max_background_queue=MAX_BACKGROUND_ENRICHMENTS
     )
+    
+    if pending_background:
+        deduped = list(dict.fromkeys(pending_background))
+        if deduped:
+            background_tasks.add_task(_background_enrich_lemmas, deduped)
     
     if lemmas_updated:
         try:
@@ -396,7 +467,7 @@ async def get_swipe_session_vocabulary(
     lemma_ids = [lemma.id for lemma, _ in lemmas_with_status]
     frequency_map = _build_frequency_map(db, book_id, lemma_ids)
     
-    vocabulary, _ = _build_vocabulary_items(
+    vocabulary, _, _ = _build_vocabulary_items(
         lemmas_with_status,
         frequency_map,
         False,

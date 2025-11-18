@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 from collections import Counter
 from ..utils.text_utils import sanitize_text
+from ..utils.nlp_resources import ensure_core_nlp_resources
 
 class BookMetadataExtractor:
     """Extract metadata (title, author) from various book file formats using professional NLP."""
@@ -40,6 +41,7 @@ class BookMetadataExtractor:
         try:
             # NLTK for advanced NLP
             import nltk
+            ensure_core_nlp_resources()
             self.nlp_tools['nltk'] = True
             print("NLTK library loaded successfully")
         except ImportError:

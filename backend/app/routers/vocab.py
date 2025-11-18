@@ -330,12 +330,12 @@ def _build_vocabulary_items(
 @router.get("/book/{book_id}", response_model=VocabularyResponse)
 async def get_book_vocabulary(
     book_id: int,
+    background_tasks: BackgroundTasks,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=1000),
     sort_by: str = Query("frequency", regex="^(frequency|alphabetical|chronological|random)$"),
     filter_status: Optional[str] = Query(None, regex="^(learned|known|learning|unknown|ignored)$"),
     chapter: Optional[int] = Query(None, ge=0),
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user_real)
 ):

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -22,15 +22,17 @@ interface Book {
   unique_lemmas: number;
 }
 
+type ErrorState = {
+  title?: string;
+  message: string;
+  details?: string;
+  suggestions?: string[];
+};
+
 const BooksManagement: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<{
-    title?: string;
-    message: string;
-    details?: string;
-    suggestions?: string[];
-  } | null>(null);
+  const [error, setError] = useState<ErrorState | null>(null);
   const [deletingBookId, setDeletingBookId] = useState<number | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
   const navigate = useNavigate();
@@ -43,6 +45,11 @@ const BooksManagement: React.FC = () => {
   const [filterLanguage, setFilterLanguage] = useState(searchParams.get('language') || '');
   const [filterStatus, setFilterStatus] = useState(searchParams.get('status') || '');
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'date-desc');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<ErrorState | null>(null);
 
   // Update URL params when filters change
   useEffect(() => {
@@ -53,6 +60,14 @@ const BooksManagement: React.FC = () => {
     if (sortBy !== 'date-desc') params.set('sort', sortBy);
     setSearchParams(params, { replace: true });
   }, [searchQuery, filterLanguage, filterStatus, sortBy, setSearchParams]);
+
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, []);
 
   const loadUserBooks = useCallback(async () => {
     if (!token) {
@@ -127,6 +142,185 @@ const BooksManagement: React.FC = () => {
       setLoading(false);
     }
   }, [token, loadUserBooks]);
+
+  const resetFileInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const startProgressSimulation = () => {
+    setUploadProgress(0);
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+    progressIntervalRef.current = setInterval(() => {
+      setUploadProgress((prev) => (prev >= 90 ? prev : prev + 5));
+    }, 200);
+  };
+
+  const stopProgressSimulation = () => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+  };
+
+  const handleUploadButtonClick = () => {
+    setUploadError(null);
+    if (!token) {
+      showToast('Please sign in again to upload a book.', 'warning');
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!token) {
+      showToast('Please sign in again to upload a book.', 'warning');
+      resetFileInput();
+      return;
+    }
+
+    const allowedExtensions = ['.pdf', '.epub', '.txt', '.docx'];
+    const lastDotIndex = file.name.lastIndexOf('.');
+    const fileExtension = lastDotIndex !== -1 ? file.name.toLowerCase().substring(lastDotIndex) : '';
+    if (!allowedExtensions.includes(fileExtension)) {
+      setUploadError({
+        title: 'Unsupported file format',
+        message: `We only support ${allowedExtensions.join(', ')} files.`,
+        suggestions: [
+          'Convert your file to PDF, EPUB, TXT, or DOCX format',
+          'Check that the file extension is correct',
+          'Try a different file'
+        ]
+      });
+      resetFileInput();
+      return;
+    }
+
+    const maxSize = 50 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setUploadError({
+        title: 'File too large',
+        message: 'The file is larger than 50MB. Please use a smaller file.',
+        suggestions: [
+          'Try compressing the PDF',
+          'Split the book into smaller parts',
+          'Use a text file instead of PDF for smaller size'
+        ]
+      });
+      resetFileInput();
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+    startProgressSimulation();
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const fetchOptions: RequestInit = {
+        method: 'POST',
+        body: formData,
+      };
+
+      if (token) {
+        fetchOptions.headers = {
+          Authorization: `Bearer ${token}`,
+        };
+      }
+
+      const response = await fetch(`${API_BASE_URL}/upload/book`, fetchOptions);
+
+      if (!response.ok) {
+        let errorMessage = `Upload failed (${response.status})`;
+        let errorDetails = '';
+
+        try {
+          const errorData = await response.json().catch(() => null);
+          if (errorData?.detail) {
+            errorMessage = errorData.detail;
+          } else {
+            const errorText = await response.text();
+            errorDetails = errorText;
+          }
+        } catch (err) {
+          errorDetails = response.statusText;
+        }
+
+        const suggestions: string[] = [];
+        if (response.status === 401 || response.status === 403) {
+          suggestions.push('Try logging out and back in');
+          suggestions.push('Check that your session hasn\'t expired');
+        } else if (response.status === 413) {
+          suggestions.push('The file is too large (max 50MB)');
+          suggestions.push('Try compressing the file or splitting it');
+        } else if (response.status === 415) {
+          suggestions.push('The file format may not be supported');
+          suggestions.push('Try converting to PDF or EPUB format');
+        } else if (response.status >= 500) {
+          suggestions.push('The server may be temporarily unavailable');
+          suggestions.push('Try again in a few minutes');
+        } else {
+          suggestions.push('Try again in a few minutes');
+        }
+
+        throw {
+          message: errorMessage,
+          details: errorDetails,
+          suggestions
+        };
+      }
+
+      let result: any;
+      try {
+        result = await response.json();
+      } catch (parseError: unknown) {
+        throw {
+          message: 'Server returned invalid response format',
+          details: parseError instanceof Error ? parseError.message : String(parseError),
+          suggestions: ['Try the upload again', 'If the issue persists, contact support']
+        };
+      }
+
+      if (!result || typeof result !== 'object' || result.book_id === undefined || result.book_id === null) {
+        throw {
+          message: 'Server did not return a valid book ID',
+          suggestions: ['Try the upload again', 'If the issue persists, contact support']
+        };
+      }
+
+      setUploadProgress(100);
+      showToast('Book uploaded successfully! Vocabulary processing in background.', 'success');
+      await loadUserBooks();
+
+      setTimeout(() => {
+        navigate(`/book/${result.book_id}`);
+      }, 500);
+    } catch (err: any) {
+      const errorMessage = err?.message || 'Upload failed';
+      setUploadError({
+        title: 'Upload failed',
+        message: errorMessage,
+        details: err?.details,
+        suggestions: err?.suggestions
+      });
+      showToast(errorMessage, 'warning');
+    } finally {
+      stopProgressSimulation();
+      setIsUploading(false);
+      setTimeout(() => setUploadProgress(0), 400);
+      resetFileInput();
+    }
+  };
 
   const handleBookSelect = (bookId: number) => {
     navigate(`/book/${bookId}`);
@@ -448,13 +642,56 @@ const BooksManagement: React.FC = () => {
         <div className="bg-white shadow rounded-lg mb-8">
           <div className="px-6 py-4">
             <button
-              onClick={() => navigate('/')}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              onClick={handleUploadButtonClick}
+              disabled={isUploading}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              <span className="mr-2">📤</span>
-              Upload New Book
+              <span className="mr-2" aria-hidden="true">{isUploading ? '⏳' : '📤'}</span>
+              {isUploading ? 'Uploading...' : 'Upload New Book'}
             </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.epub,.txt,.docx"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+            <p className="text-sm text-gray-500 mt-3">
+              Supports PDF, EPUB, TXT, DOCX (max 50MB)
+            </p>
           </div>
+          {isUploading && (
+            <div className="px-6 pb-4">
+              <div className="flex items-center text-sm text-gray-600 mb-2">
+                <div
+                  className="h-4 w-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mr-2"
+                  aria-hidden="true"
+                />
+                Uploading... {uploadProgress}%
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2" aria-hidden="true">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {uploadError && (
+            <div className="px-6 pb-4">
+              <ErrorMessage
+                title={uploadError.title}
+                message={uploadError.message}
+                details={uploadError.details}
+                suggestions={uploadError.suggestions}
+                onRetry={() => {
+                  setUploadError(null);
+                  handleUploadButtonClick();
+                }}
+                onDismiss={() => setUploadError(null)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Books Grid */}
@@ -472,21 +709,22 @@ const BooksManagement: React.FC = () => {
         )}
 
         {books.length === 0 ? (
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-6 py-12 text-center">
-              <div className="text-6xl mb-4">📚</div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No books yet</h3>
-              <p className="text-gray-500 mb-6">
-                Start building your vocabulary library by uploading your first book.
-              </p>
-              <button
-                onClick={() => navigate('/')}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                Upload Your First Book
-              </button>
+            <div className="bg-white shadow rounded-lg">
+              <div className="px-6 py-12 text-center">
+                <div className="text-6xl mb-4">📚</div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No books yet</h3>
+                <p className="text-gray-500 mb-6">
+                  Start building your vocabulary library by uploading your first book.
+                </p>
+                <button
+                  onClick={handleUploadButtonClick}
+                  disabled={isUploading}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {isUploading ? 'Uploading...' : 'Upload Your First Book'}
+                </button>
+              </div>
             </div>
-          </div>
         ) : filteredAndSortedBooks.length === 0 ? (
           <div className="bg-white shadow rounded-lg">
             <div className="px-6 py-12 text-center">

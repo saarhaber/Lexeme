@@ -552,12 +552,8 @@ class ComprehensiveVocabularyProcessor:
         translations = []
         try:
             import nltk
-            try:
-                nltk.data.find('corpora/wordnet')
-            except LookupError:
-                print("Downloading NLTK wordnet...")
-                nltk.download('wordnet', quiet=True)
-                nltk.download('omw-1.4', quiet=True)
+            ensure_nltk_resource('wordnet', 'corpora/wordnet')
+            ensure_nltk_resource('omw-1.4', 'corpora/omw-1.4')
             
             from nltk.corpus import wordnet
             
@@ -798,12 +794,8 @@ class ComprehensiveVocabularyProcessor:
             try:
                 import nltk
                 
-                # Try to download and use NLTK stop words for the detected language
-                try:
-                    nltk.data.find('corpora/stopwords')
-                except LookupError:
-                    print("Downloading NLTK stop words...")
-                    nltk.download('stopwords', quiet=True)
+                # Ensure stopwords resource is present once
+                ensure_nltk_resource('stopwords', 'corpora/stopwords')
                 
                 from nltk.corpus import stopwords
                 

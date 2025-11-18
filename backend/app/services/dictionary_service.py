@@ -2,6 +2,7 @@
 Dictionary service for fetching translations and grammar information.
 Uses multiple free APIs and fallback methods.
 """
+import os
 import requests
 from typing import Dict, List, Optional
 import json
@@ -17,6 +18,7 @@ class DictionaryService:
         self.normalization_cache = {}
         self._spacy_models = {}
         self._spacy_download_attempted = set()
+        self.spacy_auto_download_enabled = self._should_auto_download_spacy()
 
     def normalize_word_form(self, word: str, language: str) -> str:
         """
@@ -109,6 +111,11 @@ class DictionaryService:
         self.normalization_cache[cache_key] = normalized
         return normalized
     
+    def _should_auto_download_spacy(self) -> bool:
+        """Check env flag to see if we should download spaCy models at runtime."""
+        flag = os.getenv("SPACY_AUTO_DOWNLOAD", "")
+        return flag.lower() in {"1", "true", "yes"}
+
     def _get_spacy_model(self, language: str):
         """Lazily load and cache spaCy models per language."""
         if language in self._spacy_models:
@@ -144,14 +151,22 @@ class DictionaryService:
             self._spacy_models[language] = nlp
             return nlp
         except OSError:
-            # Try downloading the model once
+            # Try downloading the model once (if enabled)
             self._spacy_download_attempted.add(model_name)
-            try:
-                from spacy.cli import download
-                download(model_name)
-                nlp = spacy.load(model_name)
-            except Exception:
+            if not self.spacy_auto_download_enabled:
+                print(
+                    f"[DictionaryService] spaCy model '{model_name}' not found and auto-download is disabled. "
+                    "Set SPACY_AUTO_DOWNLOAD=1 to enable downloads at startup."
+                )
                 nlp = None
+            else:
+                try:
+                    from spacy.cli import download
+                    download(model_name)
+                    nlp = spacy.load(model_name)
+                except Exception as exc:
+                    print(f"[DictionaryService] Failed to auto-download spaCy model '{model_name}': {exc}")
+                    nlp = None
         except Exception:
             nlp = None
         

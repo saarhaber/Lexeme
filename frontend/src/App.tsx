@@ -21,6 +21,7 @@ const VocabLists = lazy(() => import('./pages/VocabLists'));
 const SRSReview = lazy(() => import('./pages/SRSReview'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 const DemoExperience = lazy(() => import('./pages/DemoExperience'));
+const About = lazy(() => import('./pages/About'));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -61,46 +62,47 @@ function AppRoutes() {
               <Route path="/demo" element={<DemoExperience />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/onboarding" element={<Onboarding />} />
-                <Route
-                  path="/books"
-                  element={
-                    <ProtectedRoute>
-                      <BooksManagement />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/book/:bookId"
-                  element={
-                    <ProtectedRoute>
-                      <BookDashboard />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/book/:bookId/vocabulary"
-                  element={
-                    <ProtectedRoute>
-                      <VocabularyExplorer />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/book/:bookId/study"
-                  element={
-                    <ProtectedRoute>
-                      <SwipeStudySession />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/book/:bookId/study/swipe"
-                  element={
-                    <ProtectedRoute>
-                      <SwipeStudySession />
-                    </ProtectedRoute>
-                  }
-                />
+              <Route path="/about" element={<About />} />
+              <Route
+                path="/books"
+                element={
+                  <ProtectedRoute>
+                    <BooksManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/book/:bookId"
+                element={
+                  <ProtectedRoute>
+                    <BookDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/book/:bookId/vocabulary"
+                element={
+                  <ProtectedRoute>
+                    <VocabularyExplorer />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/book/:bookId/study"
+                element={
+                  <ProtectedRoute>
+                    <SwipeStudySession />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/book/:bookId/study/swipe"
+                element={
+                  <ProtectedRoute>
+                    <SwipeStudySession />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/book/:bookId/reading"
                 element={

@@ -25,6 +25,11 @@ const Navigation: React.FC = () => {
     return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
 
+  const sharedNavItems = [
+    { path: '/about', label: 'About' },
+    { path: '/demo', label: 'Demo' },
+  ];
+
   const baseNavItems = isAuthenticated
     ? [
         { path: '/books', label: 'My Books' },
@@ -35,7 +40,7 @@ const Navigation: React.FC = () => {
       ]
     : [{ path: '/', label: 'Home' }];
 
-  const navItems = [...baseNavItems, { path: '/demo', label: 'Demo' }];
+  const navItems = [...baseNavItems, ...sharedNavItems];
 
   const renderNavLink = (item: { path: string; label: string }, variant: 'desktop' | 'mobile' = 'desktop') => {
     const isActive = isNavItemActive(item.path);

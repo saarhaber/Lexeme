@@ -21,6 +21,7 @@ const ProgressDashboard = lazy(() => import('./pages/ProgressDashboard'));
 const VocabLists = lazy(() => import('./pages/VocabLists'));
 const SRSReview = lazy(() => import('./pages/SRSReview'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
+const DemoExperience = lazy(() => import('./pages/DemoExperience'));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -58,6 +59,7 @@ function AppRoutes() {
           <PageTransition>
             <Routes>
               <Route path="/" element={<HomePage />} />
+              <Route path="/demo" element={<DemoExperience />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route

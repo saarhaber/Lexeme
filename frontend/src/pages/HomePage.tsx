@@ -242,7 +242,7 @@ const HomePage: React.FC = () => {
   };
 
   const handleTryDemo = () => {
-    alert('Demo functionality coming soon!');
+    navigate('/demo');
   };
 
   return (
@@ -256,10 +256,25 @@ const HomePage: React.FC = () => {
           The only vocabulary app that learns from YOUR reading
         </p>
 
-        <p className="text-base md:text-lg text-gray-600 mb-12 max-w-2xl mx-auto px-4">
+          <p className="text-base md:text-lg text-gray-600 mb-6 max-w-2xl mx-auto px-4">
           Upload any book (PDF, EPUB, or text) in any language. Lexeme extracts every word,
           teaches you vocabulary in context, and never spoils the story.
         </p>
+
+          <div className="flex flex-wrap justify-center gap-3 mb-12 px-4">
+            <button
+              onClick={handleTryDemo}
+              className="px-6 py-3 rounded-lg border border-blue-200 text-blue-700 bg-white hover:bg-blue-50 transition-all duration-200 transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              <span aria-hidden="true">🎯</span> Try the interactive demo
+            </button>
+            <button
+              onClick={() => navigate('/onboarding')}
+              className="px-6 py-3 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all duration-200 transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              Start guided onboarding
+            </button>
+          </div>
 
         {isAuthenticated && user && (
           <div className="mb-8 p-4 bg-green-50 border border-green-200 rounded-lg">

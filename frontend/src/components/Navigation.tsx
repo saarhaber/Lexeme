@@ -33,7 +33,7 @@ const Navigation: React.FC = () => {
     return `${sizeClasses} ${baseClasses} ${stateClasses}`;
   };
 
-  const navItems = isAuthenticated
+  const baseNavItems = isAuthenticated
     ? [
         { path: '/books', label: 'My Books' },
         { path: '/review', label: 'Review' },
@@ -42,6 +42,8 @@ const Navigation: React.FC = () => {
         { path: '/settings', label: 'Settings' },
       ]
     : [{ path: '/', label: 'Home' }];
+
+  const navItems = [...baseNavItems, { path: '/demo', label: 'Demo' }];
 
   return (
     <nav className="bg-white shadow-sm border-b border-gray-200" role="navigation" aria-label="Main navigation">

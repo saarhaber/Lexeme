@@ -53,6 +53,64 @@ const MAX_SESSION_WORDS = 200;
 const BULK_THRESHOLD = 6;
 const BULK_MAX = 40;
 const BULK_FLUSH_INTERVAL = 1500;
+const RECENT_WORD_STORAGE_KEY = 'swipe_recent_word_ids';
+const RECENT_WORD_HISTORY_LIMIT = 400;
+
+const readRecentSwipeHistory = (): number[] => {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(RECENT_WORD_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+      .slice(-RECENT_WORD_HISTORY_LIMIT);
+  } catch (error) {
+    console.warn('Failed to read swipe history', error);
+    return [];
+  }
+};
+
+const persistRecentSwipeHistory = (ids: number[]) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      RECENT_WORD_STORAGE_KEY,
+      JSON.stringify(ids.slice(-RECENT_WORD_HISTORY_LIMIT))
+    );
+  } catch (error) {
+    console.warn('Failed to persist swipe history', error);
+  }
+};
+
+const prioritizeVocabularyForSession = (
+  items: VocabularyItem[],
+  seenIds: Set<number>
+): VocabularyItem[] => {
+  if (!seenIds.size) {
+    return items;
+  }
+  const fresh: VocabularyItem[] = [];
+  const repeats: VocabularyItem[] = [];
+  items.forEach((item) => {
+    if (seenIds.has(item.lemma.id)) {
+      repeats.push(item);
+    } else {
+      fresh.push(item);
+    }
+  });
+  return [...fresh, ...repeats];
+};
 
 const SwipeStudySession: React.FC = () => {
   const { bookId } = useParams<{ bookId: string }>();
@@ -81,6 +139,8 @@ const SwipeStudySession: React.FC = () => {
   const pendingUpdatesRef = useRef<PendingUpdate[]>([]);
   const flushTimeoutRef = useRef<number | null>(null);
   const isFlushingRef = useRef(false);
+  const recentWordIdsRef = useRef<Set<number>>(new Set());
+  const sessionSeenIdsRef = useRef<Set<number>>(new Set());
 
   // Load vocabulary
   // Close dropdown when clicking outside
@@ -132,8 +192,16 @@ const SwipeStudySession: React.FC = () => {
         });
 
       const uniqueWords = Array.from(dedupedMap.values());
+      const storedRecentIds = new Set(readRecentSwipeHistory());
+      recentWordIdsRef.current = storedRecentIds;
+      sessionSeenIdsRef.current.clear();
 
-      setWords(uniqueWords);
+      const prioritizedWords = prioritizeVocabularyForSession(uniqueWords, storedRecentIds).slice(
+        0,
+        MAX_SESSION_WORDS
+      );
+
+      setWords(prioritizedWords);
       setCurrentIndex(0);
       setShowTranslation(false);
       resetCardPosition();
@@ -338,6 +406,15 @@ const SwipeStudySession: React.FC = () => {
     if (currentIndex >= words.length) return;
     
     const currentWord = words[currentIndex];
+    sessionSeenIdsRef.current.add(currentWord.lemma.id);
+    const existingHistory = Array.from(recentWordIdsRef.current).filter(
+      (id) => id !== currentWord.lemma.id
+    );
+    existingHistory.push(currentWord.lemma.id);
+    const trimmedHistory = existingHistory.slice(-RECENT_WORD_HISTORY_LIMIT);
+    recentWordIdsRef.current = new Set(trimmedHistory);
+    persistRecentSwipeHistory(trimmedHistory);
+    
     queueStatusUpdate(currentWord.lemma.id, status);
     
     if (currentIndex < words.length - 1) {

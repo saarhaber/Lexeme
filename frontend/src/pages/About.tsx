@@ -1,11 +1,11 @@
 import React from 'react';
 
 const SaarLabsProjects = [
-  {
-    name: 'Shablam',
-    tagline: '"Shazam for Drag Race" runway anthems',
-    description:
-      "Tap to identify any RuPaul's Drag Race runway track, save it to playlists, and dive into performance lore within seconds.",
+    {
+      name: 'Shablam',
+      tagline: '"Shazam for Drag Race" runway anthems',
+      description:
+        "Tap to identify any RuPaul's Drag Race runway track and dive into performance lore within seconds.",
     links: [
       { label: 'shablam.app', href: 'https://shablam.app' },
       { label: 'Android app', href: 'https://play.google.com/store/apps/details?id=com.saarlabs.shablam' },
@@ -54,22 +54,14 @@ const About: React.FC = () => {
         </ul>
       </section>
 
-      <section className="bg-white border border-gray-200 rounded-xl p-8 space-y-4">
-        <h2 className="text-2xl font-heading font-semibold text-gray-900">Built by Saar Labs</h2>
-        <p className="text-gray-700 leading-relaxed">
-          Saar Labs is a tiny applied research studio exploring fan-first music and media tools. Each prototype obsessively
-          focuses on a niche community--then pushes on multimodal AI, recognition tech, and creative tooling to make that
-          audience feel seen. Lexeme extends that same philosophy to readers chasing fluency through full-length books.
-        </p>
-        <a
-          href="https://saarlabs.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center text-primary font-semibold hover:underline"
-        >
-          Visit saarlabs.com {'->'}
-        </a>
-      </section>
+        <section className="bg-white border border-gray-200 rounded-xl p-8 space-y-4">
+          <h2 className="text-2xl font-heading font-semibold text-gray-900">Built by Saar Labs</h2>
+          <p className="text-gray-700 leading-relaxed">
+            Saar Labs is a tiny applied research studio exploring fan-first music and media tools. Each prototype obsessively
+            focuses on a niche community--then pushes on multimodal AI, recognition tech, and creative tooling to make that
+            audience feel seen. Lexeme extends that same philosophy to readers chasing fluency through full-length books.
+          </p>
+        </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-8 space-y-6">
         <div>

@@ -1,6 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+
+type NavItem = {
+  path: string;
+  label: string;
+  icon?: string;
+  match?: (pathname: string) => boolean;
+};
+
+const SHARED_NAV_ITEMS: NavItem[] = [
+  { path: '/about', label: 'About', icon: 'ℹ️' },
+  { path: '/demo', label: 'Demo', icon: '🎯' },
+];
 
 const Navigation: React.FC = () => {
   const location = useLocation();
@@ -8,150 +20,271 @@ const Navigation: React.FC = () => {
   const { isAuthenticated, user, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/');
-    setIsMenuOpen(false);
-  };
+  const closeMenu = () => setIsMenuOpen(false);
+
+  useEffect(() => {
+    if (isMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMenuOpen]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMenuOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     setIsMenuOpen(false);
   }, [location.pathname, isAuthenticated]);
 
-  const isNavItemActive = (path: string) => {
-    if (path === '/') {
+  const handleLogout = () => {
+    logout();
+    setIsMenuOpen(false);
+    navigate('/');
+  };
+
+  const navItems = useMemo<NavItem[]>(() => {
+    if (!isAuthenticated) {
+      return [{ path: '/', label: 'Home', icon: '🏠' }, ...SHARED_NAV_ITEMS];
+    }
+
+    return [
+      {
+        path: '/books',
+        label: 'Books',
+        icon: '📚',
+        match: (pathname) => pathname === '/books' || pathname.startsWith('/book/'),
+      },
+      { path: '/review', label: 'Review', icon: '🔁' },
+      { path: '/progress', label: 'Progress', icon: '📈' },
+      {
+        path: '/vocab-lists',
+        label: 'Lists',
+        icon: '📝',
+        match: (pathname) => pathname.startsWith('/vocab-lists'),
+      },
+      { path: '/settings', label: 'Settings', icon: '⚙️' },
+      ...SHARED_NAV_ITEMS,
+    ];
+  }, [isAuthenticated]);
+
+  const isItemActive = (item: NavItem) => {
+    if (item.match) {
+      return item.match(location.pathname);
+    }
+    if (item.path === '/') {
       return location.pathname === '/';
     }
-    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+    return location.pathname === item.path;
   };
 
-  const sharedNavItems = [
-    { path: '/about', label: 'About' },
-    { path: '/demo', label: 'Demo' },
-  ];
-
-  const baseNavItems = isAuthenticated
-    ? [
-        { path: '/books', label: 'My Books' },
-        { path: '/review', label: 'Review' },
-        { path: '/progress', label: 'Progress' },
-        { path: '/vocab-lists', label: 'Lists' },
-        { path: '/settings', label: 'Settings' },
-      ]
-    : [{ path: '/', label: 'Home' }];
-
-  const navItems = [...baseNavItems, ...sharedNavItems];
-
-  const renderNavLink = (item: { path: string; label: string }, variant: 'desktop' | 'mobile' = 'desktop') => {
-    const isActive = isNavItemActive(item.path);
-    const baseClasses =
-      variant === 'desktop'
-        ? 'px-2 md:px-3 py-2 rounded-md text-xs md:text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2'
-        : 'block px-3 py-2 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2';
-    const activeClasses = isActive ? 'text-primary bg-blue-50' : 'text-gray-600 hover:text-primary hover:bg-gray-50';
-    return (
-      <Link
-        key={`${variant}-${item.path}`}
-        to={item.path}
-        onClick={() => setIsMenuOpen(false)}
-        className={`${baseClasses} ${activeClasses}`}
-        aria-current={isActive ? 'page' : undefined}
-      >
-        {item.label}
-      </Link>
-    );
-  };
+  const bottomNavItems = isAuthenticated
+    ? navItems.filter((item) => ['/books', '/review', '/progress', '/settings'].includes(item.path))
+    : [];
 
   return (
     <>
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:left-4 focus:top-4 focus:bg-white focus:text-primary focus:px-4 focus:py-2 focus:rounded focus:shadow-lg"
+      <nav
+        className="sticky top-0 z-40 border-b border-gray-100 bg-white/90 backdrop-blur-md"
+        role="navigation"
+        aria-label="Primary"
+        style={{ paddingTop: 'calc(var(--safe-area-top) + 0.25rem)' }}
       >
-        Skip to main content
-      </a>
-      <nav className="bg-white shadow-sm border-b border-gray-200" role="navigation" aria-label="Main navigation">
-        <div className="container mx-auto px-4">
-          <div className="flex justify-between items-center h-16">
-            <Link
-              to={isAuthenticated ? '/books' : '/'}
-              className="text-xl md:text-2xl font-heading font-bold text-primary focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
-              aria-label="Lexeme home"
-            >
-              <span aria-hidden="true">📘</span> <span className="hidden sm:inline">Lexeme</span>
-            </Link>
-
-            <div className="flex items-center space-x-2 md:space-x-4">
-              {isAuthenticated && user && (
-                <span className="text-sm text-gray-600 md:hidden" aria-label={`Logged in as ${user.username}`}>
-                  <span aria-hidden="true">👤</span>
-                </span>
-              )}
-              <button
-                type="button"
-                className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 md:hidden"
-                onClick={() => setIsMenuOpen((prev) => !prev)}
-                aria-expanded={isMenuOpen}
-                aria-controls="mobile-nav"
-                aria-label="Toggle navigation menu"
-              >
-                {isMenuOpen ? (
-                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                ) : (
-                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                )}
-              </button>
-
-              <div className="hidden md:flex items-center space-x-2 md:space-x-4">
-                {navItems.map((item) => renderNavLink(item))}
-                {isAuthenticated && user && (
-                  <>
-                    <span className="text-sm text-gray-600" aria-label={`Logged in as ${user.username}`}>
-                      <span aria-hidden="true">👤</span> {user.username}
-                    </span>
-                    <button
-                      onClick={handleLogout}
-                      className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
-                      aria-label="Log out"
-                      type="button"
-                    >
-                      Logout
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div
-            id="mobile-nav"
-            className={`md:hidden border-t border-gray-100 ${isMenuOpen ? 'block' : 'hidden'}`}
-            aria-label="Mobile navigation"
+        <div
+          className="mx-auto flex w-full items-center justify-between gap-3 px-4 phone:px-5 pb-3"
+          style={{ maxWidth: 'var(--app-max-width)' }}
+        >
+          <Link
+            to={isAuthenticated ? '/books' : '/'}
+            className="flex items-center gap-2 text-lg font-heading font-bold text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+            aria-label="Lexeme home"
           >
-            <div className="py-3 space-y-1">
-              {navItems.map((item) => renderNavLink(item, 'mobile'))}
-              {isAuthenticated && user && (
-                <div className="px-3 pt-2">
-                  <p className="text-sm text-gray-600 mb-2">
-                    Logged in as <span className="font-medium">{user.username}</span>
-                  </p>
-                  <button
-                    onClick={handleLogout}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                    type="button"
-                  >
-                    Logout
-                  </button>
+            <span className="text-2xl" aria-hidden="true">
+              📘
+            </span>
+            <span className="text-xl sm:text-2xl">Lexeme</span>
+          </Link>
+
+          {isAuthenticated && (
+            <button
+              onClick={() => navigate('/books')}
+              className="hidden rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-primary transition hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:inline-flex"
+            >
+              My Library
+            </button>
+          )}
+
+          <div className="flex items-center gap-2">
+            {isAuthenticated && user ? (
+              <>
+                <div className="hidden flex-col text-right text-xs font-medium text-gray-500 sm:flex">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400">Signed in</span>
+                  <span className="text-sm text-gray-900">{user.username}</span>
                 </div>
-              )}
-            </div>
+                <button
+                  onClick={handleLogout}
+                  className="hidden rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 transition hover:border-gray-300 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:inline-flex"
+                >
+                  Logout
+                </button>
+                <button
+                  onClick={() => setIsMenuOpen(true)}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 text-xl text-gray-700 transition hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:hidden"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+              </>
+            ) : (
+              <Link
+                to="/"
+                className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                Sign In
+              </Link>
+            )}
+          </div>
+        </div>
+
+        <div
+          className="mx-auto w-full overflow-x-auto px-4 phone:px-5 pb-3"
+          style={{ maxWidth: 'var(--app-max-width)' }}
+        >
+          <div className="flex items-center gap-2">
+            {navItems.map((item) => {
+              const active = isItemActive(item);
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={closeMenu}
+                  className={`inline-flex items-center gap-1 rounded-full border px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                    active
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
+                  }`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {item.icon && (
+                    <span className="text-lg" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                  )}
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </nav>
+
+      {isAuthenticated && bottomNavItems.length > 0 && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-md sm:hidden"
+          role="navigation"
+          aria-label="Quick actions"
+          style={{ paddingBottom: 'calc(0.5rem + var(--safe-area-bottom))' }}
+        >
+          <div
+            className="mx-auto flex w-full items-center justify-around px-6 pt-3"
+            style={{ maxWidth: 'var(--app-max-width)' }}
+          >
+            {bottomNavItems.map((item) => {
+              const active = isItemActive(item);
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`flex flex-col items-center text-xs font-semibold transition ${
+                    active ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  <span
+                    className={`mb-1 flex h-10 w-10 items-center justify-center rounded-full text-lg ${
+                      active ? 'bg-blue-50' : 'bg-gray-100'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {isAuthenticated && isMenuOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm sm:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Account menu"
+          onClick={closeMenu}
+        >
+          <div
+            className="absolute inset-x-0 bottom-0 rounded-t-3xl bg-white p-6 shadow-soft-card"
+            style={{ maxWidth: 'var(--app-max-width)', margin: '0 auto' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400">Signed in as</p>
+                <p className="text-lg font-semibold text-gray-900">{user?.username}</p>
+              </div>
+              <button
+                onClick={closeMenu}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-xl text-gray-700"
+                aria-label="Close menu"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {navItems.map((item) => {
+                const active = isItemActive(item);
+                return (
+                  <Link
+                    key={`${item.path}-drawer`}
+                    to={item.path}
+                    onClick={closeMenu}
+                    className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-base font-medium transition ${
+                      active
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className="text-2xl" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="mt-6 flex w-full items-center justify-center rounded-2xl bg-gray-900 py-3 text-base font-semibold text-white transition hover:bg-gray-800"
+            >
+              Log out
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 };

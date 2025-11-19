@@ -12,6 +12,8 @@ const Navigation: React.FC = () => {
     navigate('/');
   };
 
+  const sharedNavItems = [{ path: '/about', label: 'About' }];
+
   const navItems = isAuthenticated
     ? [
         { path: '/books', label: 'My Books' },
@@ -19,8 +21,9 @@ const Navigation: React.FC = () => {
         { path: '/progress', label: 'Progress' },
         { path: '/vocab-lists', label: 'Lists' },
         { path: '/settings', label: 'Settings' },
+        ...sharedNavItems,
       ]
-    : [{ path: '/', label: 'Home' }];
+    : [{ path: '/', label: 'Home' }, ...sharedNavItems];
 
   return (
     <nav className="bg-white shadow-sm border-b border-gray-200" role="navigation" aria-label="Main navigation">

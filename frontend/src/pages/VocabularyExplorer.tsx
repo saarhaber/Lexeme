@@ -270,43 +270,24 @@ const VocabularyExplorer: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-6">
-      {/* Prominent Study Mode Banner */}
-      <div className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-6 border-2 border-blue-200">
-        <h2 className="text-xl font-bold text-gray-900 mb-3">🎯 Ready to Study?</h2>
-        <p className="text-gray-700 mb-4">Choose your preferred study mode to practice vocabulary interactively!</p>
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() => navigate(`/book/${bookId}/study`)}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-md hover:shadow-lg"
-          >
-            🃏 Flashcards Mode
-          </button>
-          <button
-            onClick={() => navigate(`/book/${bookId}/study`)}
-            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium shadow-md hover:shadow-lg"
-          >
-            ✅ Multiple Choice Mode
-          </button>
-          <button
-            onClick={() => navigate(`/book/${bookId}/study`)}
-            className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-md hover:shadow-lg"
-          >
-            ⌨️ Typing Mode
-          </button>
-          <button
-            onClick={() => navigate(`/book/${bookId}/study/swipe`)}
-            className="px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-colors font-medium shadow-md hover:shadow-lg"
-          >
-            💫 Swipe Mode
-          </button>
-          <button
-            onClick={() => navigate(`/book/${bookId}/reading`)}
-            className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md hover:shadow-lg"
-          >
-            📖 Reading Mode
-          </button>
+        {/* Swipe Study Banner */}
+        <div className="mb-6 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 rounded-lg p-6 border-2 border-purple-200">
+          <div className="flex flex-col md:flex-row items-center gap-4">
+            <div className="text-4xl md:text-5xl" aria-hidden="true">💫</div>
+            <div className="flex-1 text-center md:text-left">
+              <h2 className="text-xl font-bold text-gray-900 mb-2">Swipe Mode is the way to study</h2>
+              <p className="text-gray-700 text-sm md:text-base">
+                Review vocabulary with fast left/right gestures, reveal definitions with a swipe up, and keep your learning flow moving.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(`/book/${bookId}/study/swipe`)}
+              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-colors font-semibold shadow-md hover:shadow-lg"
+            >
+              Start Swipe Study
+            </button>
+          </div>
         </div>
-      </div>
 
       <div className="mb-8 flex justify-between items-center">
         <div>

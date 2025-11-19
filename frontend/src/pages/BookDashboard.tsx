@@ -209,10 +209,6 @@ const BookDashboard: React.FC = () => {
     }
   };
 
-  const startStudying = () => {
-    navigate(`/book/${bookId}/study`);
-  };
-
   const exploreVocabulary = () => {
     navigate(`/book/${bookId}/vocabulary`);
   };
@@ -348,51 +344,25 @@ const BookDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Study Modes Section - Prominent */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 md:p-8 mb-8 border-2 border-blue-300 shadow-lg">
-        <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4 text-center">
-          <span aria-hidden="true">🎯</span> Other Study Modes
-        </h2>
-        <p className="text-gray-700 mb-6 text-center text-sm md:text-base">Practice vocabulary with interactive exercises tailored to your learning style</p>
-        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          <button
-            onClick={startStudying}
-            className="bg-blue-600 text-white py-3 md:py-4 px-4 md:px-6 rounded-lg hover:bg-blue-700 transition-all duration-200 font-medium shadow-md hover:shadow-lg transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            aria-label="Start Flashcards study mode"
-          >
-            <div className="text-2xl md:text-3xl mb-2" aria-hidden="true">🃏</div>
-            <div className="font-semibold text-sm md:text-base">Flashcards</div>
-            <div className="text-xs md:text-sm opacity-90 mt-1">Flip and learn</div>
-          </button>
-          <button
-            onClick={startStudying}
-            className="bg-green-600 text-white py-3 md:py-4 px-4 md:px-6 rounded-lg hover:bg-green-700 transition-colors font-medium shadow-md hover:shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-            aria-label="Start Multiple Choice study mode"
-          >
-            <div className="text-2xl md:text-3xl mb-2" aria-hidden="true">✅</div>
-            <div className="font-semibold text-sm md:text-base">Multiple Choice</div>
-            <div className="text-xs md:text-sm opacity-90 mt-1">Test your knowledge</div>
-          </button>
-          <button
-            onClick={startStudying}
-            className="bg-purple-600 text-white py-3 md:py-4 px-4 md:px-6 rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-md hover:shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
-            aria-label="Start Typing study mode"
-          >
-            <div className="text-2xl md:text-3xl mb-2" aria-hidden="true">⌨️</div>
-            <div className="font-semibold text-sm md:text-base">Typing</div>
-            <div className="text-xs md:text-sm opacity-90 mt-1">Type to practice</div>
-          </button>
-          <button
-            onClick={startReading}
-            className="bg-indigo-600 text-white py-3 md:py-4 px-4 md:px-6 rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-md hover:shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-            aria-label="Start Reading Mode"
-          >
-            <div className="text-2xl md:text-3xl mb-2" aria-hidden="true">📖</div>
-            <div className="font-semibold text-sm md:text-base">Reading Mode</div>
-            <div className="text-xs md:text-sm opacity-90 mt-1">Learn as you read</div>
-          </button>
+        {/* Reading Mode Callout */}
+        <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg p-6 md:p-8 mb-8 border-2 border-indigo-200 shadow-lg">
+          <div className="flex flex-col md:flex-row items-center gap-6">
+            <div className="text-5xl md:text-6xl" aria-hidden="true">📖</div>
+            <div className="flex-1 text-center md:text-left">
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-2">Reading Mode</h2>
+              <p className="text-gray-700 mb-4 text-sm md:text-base">
+                Need contextual practice? Jump into reading mode to encounter vocabulary inside full sentences with instant lookups.
+              </p>
+              <button
+                onClick={startReading}
+                className="bg-indigo-600 text-white py-3 px-6 rounded-lg hover:bg-indigo-700 transition-all duration-200 font-semibold shadow-md hover:shadow-lg transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                aria-label="Start Reading Mode"
+              >
+                Launch Reading Mode
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
       {/* Additional Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mb-8">

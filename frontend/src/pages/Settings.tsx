@@ -159,16 +159,14 @@ const Settings: React.FC = () => {
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-4">Study Preferences</h2>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Default Study Mode
-            </label>
-            <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              <option>Flashcards</option>
-              <option>Multiple Choice</option>
-              <option>Typing</option>
-            </select>
-          </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Vocabulary Study Mode
+              </label>
+              <div className="w-full px-4 py-3 border border-dashed border-purple-300 rounded-lg bg-purple-50 text-sm text-gray-700">
+                Swipe Mode is the dedicated way to study vocabulary. Launch it from any book or vocabulary list to review words quickly.
+              </div>
+            </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Words per Study Session

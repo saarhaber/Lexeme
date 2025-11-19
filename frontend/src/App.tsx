@@ -11,7 +11,6 @@ import PageTransition from './components/PageTransition';
 const HomePage = lazy(() => import('./pages/HomePage'));
 const BookDashboard = lazy(() => import('./pages/BookDashboard'));
 const VocabularyExplorer = lazy(() => import('./pages/VocabularyExplorer'));
-const StudySession = lazy(() => import('./pages/StudySession'));
 const SwipeStudySession = lazy(() => import('./pages/SwipeStudySession'));
 const ReadingMode = lazy(() => import('./pages/ReadingMode'));
 const BooksManagement = lazy(() => import('./pages/BooksManagement'));
@@ -60,46 +59,46 @@ function AppRoutes() {
               <Route path="/" element={<HomePage />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/onboarding" element={<Onboarding />} />
-              <Route
-                path="/books"
-                element={
-                  <ProtectedRoute>
-                    <BooksManagement />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/book/:bookId"
-                element={
-                  <ProtectedRoute>
-                    <BookDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/book/:bookId/vocabulary"
-                element={
-                  <ProtectedRoute>
-                    <VocabularyExplorer />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/book/:bookId/study"
-                element={
-                  <ProtectedRoute>
-                    <StudySession />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/book/:bookId/study/swipe"
-                element={
-                  <ProtectedRoute>
-                    <SwipeStudySession />
-                  </ProtectedRoute>
-                }
-              />
+                <Route
+                  path="/books"
+                  element={
+                    <ProtectedRoute>
+                      <BooksManagement />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/book/:bookId"
+                  element={
+                    <ProtectedRoute>
+                      <BookDashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/book/:bookId/vocabulary"
+                  element={
+                    <ProtectedRoute>
+                      <VocabularyExplorer />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/book/:bookId/study"
+                  element={
+                    <ProtectedRoute>
+                      <SwipeStudySession />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/book/:bookId/study/swipe"
+                  element={
+                    <ProtectedRoute>
+                      <SwipeStudySession />
+                    </ProtectedRoute>
+                  }
+                />
               <Route
                 path="/book/:bookId/reading"
                 element={

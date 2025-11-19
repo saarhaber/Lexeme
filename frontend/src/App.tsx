@@ -53,7 +53,7 @@ function AppRoutes() {
     <div className="min-h-screen bg-background">
       <Navigation />
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      <main className="container mx-auto px-4 py-8">
+      <main id="main-content" className="container mx-auto px-4 py-8">
         <Suspense fallback={<SkeletonLoader />}>
           <PageTransition>
             <Routes>

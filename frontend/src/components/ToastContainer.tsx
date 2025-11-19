@@ -1,27 +1,34 @@
-import React from 'react';
-import SuccessToast, { Toast } from './SuccessToast';
+import React from "react";
+import SuccessToast, { Toast } from "./SuccessToast";
 
 interface ToastContainerProps {
   toasts: Toast[];
   onDismiss: (id: string) => void;
 }
 
-const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismiss }) => {
+const ToastContainer: React.FC<ToastContainerProps> = ({
+  toasts,
+  onDismiss,
+}) => {
   if (toasts.length === 0) return null;
 
   return (
     <div
-      className="fixed top-4 right-4 z-50 flex flex-col items-end space-y-2 max-w-md w-full md:w-auto"
+      className="pointer-events-none fixed left-0 right-0 z-40 flex justify-center px-4"
+      style={{ top: "calc(1rem + var(--safe-area-top))" }}
       role="region"
       aria-label="Notifications"
       aria-live="polite"
     >
-      {toasts.map((toast) => (
-        <SuccessToast key={toast.id} toast={toast} onDismiss={onDismiss} />
-      ))}
+      <div className="flex w-full max-w-md flex-col gap-2">
+        {toasts.map((toast) => (
+          <div key={toast.id} className="pointer-events-auto">
+            <SuccessToast toast={toast} onDismiss={onDismiss} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
 
 export default ToastContainer;
-

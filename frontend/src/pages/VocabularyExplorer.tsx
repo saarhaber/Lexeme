@@ -6,14 +6,15 @@ import AudioPlayer from '../components/AudioPlayer';
 import SearchBar from '../components/SearchBar';
 import FilterDropdown, { FilterOption } from '../components/FilterDropdown';
 import SortSelector, { SortOption } from '../components/SortSelector';
+import WordIntelligenceModal from '../components/WordIntelligenceModal';
 
 interface Lemma {
   id: number;
   lemma: string;
   language: string;
-  pos: string;
-  definition: string;
-  morphology: Record<string, any>;
+  pos: string | null;
+  definition: string | null;
+  morphology: Record<string, any> | null;
   global_frequency: number;
 }
 
@@ -21,9 +22,9 @@ interface VocabularyItem {
   lemma: Lemma;
   frequency_in_book: number;
   difficulty_estimate: number;
-  status: 'learned' | 'unknown' | 'ignored';
-  example_sentences: string[];
-  collocations: string[];
+  status: 'learned' | 'unknown';
+  example_sentences?: string[];
+  collocations?: string[];
 }
 
 interface VocabularyResponse {
@@ -58,6 +59,7 @@ const VocabularyExplorer: React.FC = () => {
   const [lastKnownCount, setLastKnownCount] = useState(0);
   const [processingComplete, setProcessingComplete] = useState(false);
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
+  const [selectedWord, setSelectedWord] = useState<VocabularyItem | null>(null);
 
   // Load favorites from localStorage
   useEffect(() => {
@@ -101,8 +103,11 @@ const VocabularyExplorer: React.FC = () => {
       const statusQuery = filterStatus && filterStatus !== 'favorites'
         ? `&filter_status=${filterStatus}`
         : '';
+      
+      // For initial load, use smaller page size for faster first render
+      const pageSize = append ? 100 : 50;
       const response = await apiGet(
-        `/vocab/book/${bookId}?sort_by=${sortBy}&page=${currentPage}&limit=100${statusQuery}`,
+        `/vocab/book/${bookId}?sort_by=${sortBy}&page=${currentPage}&limit=${pageSize}${statusQuery}`,
         token
       );
       
@@ -122,11 +127,35 @@ const VocabularyExplorer: React.FC = () => {
           return [...newWords, ...prev];
         });
       } else {
-        setVocabulary(data.vocabulary);
+        // For initial load, show first batch immediately, then load rest in background
+        if (!append && data.vocabulary.length > 0) {
+          setVocabulary(data.vocabulary);
+          setLoading(false); // Show first batch immediately
+          
+          // Load remaining items in background if there are more
+          if (data.total_count > pageSize && currentPage === 1) {
+            setTimeout(async () => {
+              try {
+                const remainingResponse = await apiGet(
+                  `/vocab/book/${bookId}?sort_by=${sortBy}&page=1&limit=100${statusQuery}`,
+                  token
+                );
+                if (remainingResponse.ok) {
+                  const remainingData: VocabularyResponse = await remainingResponse.json();
+                  setVocabulary(remainingData.vocabulary);
+                }
+              } catch (err) {
+                console.warn('Failed to load remaining vocabulary:', err);
+              }
+            }, 100);
+          }
+        } else {
+          setVocabulary(data.vocabulary);
+          setLoading(false);
+        }
       }
       
       setLastKnownCount(data.total_count);
-      setLoading(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
       setLoading(false);
@@ -244,8 +273,6 @@ const VocabularyExplorer: React.FC = () => {
     switch (status) {
       case 'learned':
         return 'bg-green-100 text-green-800 border-green-200';
-      case 'ignored':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
       case 'unknown':
       default:
         return 'bg-blue-100 text-blue-800 border-blue-200';
@@ -293,106 +320,6 @@ const VocabularyExplorer: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">📚 Vocabulary Explorer</h1>
           <p className="text-gray-600">Browse and manage vocabulary from your book</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={async () => {
-              if (token && bookId) {
-                try {
-                  const response = await apiGet(`/export/csv/${bookId}`, token);
-                  if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `book_${bookId}_vocabulary.csv`;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                  }
-                } catch (err) {
-                  console.error('Export failed:', err);
-                }
-              }
-            }}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-          >
-            📥 Export CSV
-          </button>
-          <button
-            onClick={async () => {
-              if (token && bookId) {
-                try {
-                  const response = await apiGet(`/export/anki/${bookId}`, token);
-                  if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `book_${bookId}_anki.csv`;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                  }
-                } catch (err) {
-                  console.error('Export failed:', err);
-                }
-              }
-            }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-          >
-            📥 Export Anki
-          </button>
-          <button
-            onClick={async () => {
-              if (token && bookId) {
-                try {
-                  // Export filtered vocabulary as JSON
-                  const filteredVocab = vocabulary
-                    .filter(item => 
-                      !searchQuery || 
-                      item.lemma.lemma.toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-                    .filter(item => 
-                      !filterStatus || item.status === filterStatus
-                    );
-                  
-                  const jsonData = JSON.stringify({
-                    book_id: parseInt(bookId || '0'),
-                    export_date: new Date().toISOString(),
-                    total_words: filteredVocab.length,
-                    vocabulary: filteredVocab.map(item => ({
-                      lemma: item.lemma.lemma,
-                      definition: item.lemma.definition,
-                      pos: item.lemma.pos,
-                      language: item.lemma.language,
-                      frequency_in_book: item.frequency_in_book,
-                      status: item.status,
-                      example_sentences: item.example_sentences,
-                      collocations: item.collocations
-                    }))
-                  }, null, 2);
-                  
-                  const blob = new Blob([jsonData], { type: 'application/json' });
-                  const url = window.URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `book_${bookId}_vocabulary.json`;
-                  document.body.appendChild(a);
-                  a.click();
-                  window.URL.revokeObjectURL(url);
-                  document.body.removeChild(a);
-                } catch (err) {
-                  console.error('Export failed:', err);
-                }
-              }
-            }}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
-          >
-            📥 Export JSON
-          </button>
         </div>
       </div>
 
@@ -446,7 +373,6 @@ const VocabularyExplorer: React.FC = () => {
             options={[
               { value: 'unknown', label: 'Unknown' },
                 { value: 'learned', label: 'Learned' },
-              { value: 'ignored', label: 'Ignored' },
               { value: 'favorites', label: '⭐ Favorites' }
             ]}
             value={filterStatus}
@@ -495,8 +421,8 @@ const VocabularyExplorer: React.FC = () => {
       )}
 
       {/* Vocabulary List */}
-      <div className="bg-white rounded-lg shadow-md">
-        <div className="p-6">
+      <div className="bg-gray-100 rounded-lg p-6">
+        <div>
           {vocabulary.length === 0 ? (
             <div className="text-center py-12">
               {isPolling && !processingComplete ? (
@@ -540,12 +466,26 @@ const VocabularyExplorer: React.FC = () => {
                   favorites={favorites}
                   onToggleFavorite={toggleFavorite}
                   onUpdateStatus={updateWordStatus}
+                  onOpenDetail={() => setSelectedWord(item)}
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Word Intelligence Modal */}
+      {selectedWord && (
+        <WordIntelligenceModal
+          item={selectedWord}
+          isOpen={!!selectedWord}
+          onClose={() => setSelectedWord(null)}
+          onAddToQueue={() => {
+            // TODO: Implement add to queue functionality
+            console.log('Add to queue:', selectedWord.lemma.lemma);
+          }}
+        />
+      )}
 
       {/* Pagination */}
       {vocabulary.length > 0 && (
@@ -581,13 +521,12 @@ const VocabularyItem = React.memo<{
   favorites: Set<number>;
   onToggleFavorite: (lemmaId: number) => void;
   onUpdateStatus: (lemmaId: number, newStatus: string) => void;
-}>(({ item, favorites, onToggleFavorite, onUpdateStatus }) => {
+  onOpenDetail: () => void;
+}>(({ item, favorites, onToggleFavorite, onUpdateStatus, onOpenDetail }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
         case 'learned':
         return 'bg-green-100 text-green-800 border-green-200';
-      case 'ignored':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
         case 'unknown':
       default:
         return 'bg-blue-100 text-blue-800 border-blue-200';
@@ -595,121 +534,148 @@ const VocabularyItem = React.memo<{
   };
 
   const morphology = item.lemma.morphology || {};
-  const wordForms = Array.isArray((morphology as any).forms) ? (morphology as any).forms : null;
-  const excludeKeys = ['forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'];
-  const grammarEntries = Object.entries(morphology || {})
-    .filter(([key]) => !excludeKeys.includes(key))
-    .map(([key, value]) => {
-      if (value === undefined || value === null || value === '') return '';
-      const keyFormatted = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
-      if (Array.isArray(value)) {
-        return `${keyFormatted}: ${value.join(', ')}`;
-      }
-      if (typeof value === 'boolean') {
-        return value ? keyFormatted : '';
-      }
-      return `${keyFormatted}: ${value}`;
-    })
-    .filter(Boolean);
+  const wordForms = Array.isArray((morphology as any)?.forms) ? (morphology as any).forms : null;
+  
+  // Extract type, conjugation, and form for pills
+  const type = morphology?.type || morphology?.word_type || '';
+  const conjugation = morphology?.conjugation || '';
+  const form = morphology?.form || '';
+  
+  // Helper function to clean translation text (remove plural, gender prefixes, etc.)
+  const cleanTranslation = (text: string | null): string => {
+    if (!text) return '';
+    // Split by newlines and filter out lines starting with unwanted prefixes
+    const lines = text.split('\n').filter(line => {
+      const trimmed = line.trim();
+      return trimmed && 
+        !trimmed.toLowerCase().startsWith('plural:') &&
+        !trimmed.toLowerCase().startsWith('feminine:') &&
+        !trimmed.toLowerCase().startsWith('masculine:') &&
+        !trimmed.toLowerCase().startsWith('root:') &&
+        !trimmed.toLowerCase().startsWith('prefix:') &&
+        !trimmed.toLowerCase().startsWith('suffix:');
+    });
+    // Join and clean up - take first line only for card view
+    return lines[0]?.trim() || '';
+  };
+
+  const pos = item.lemma.pos || 'NOUN';
+  const gender = morphology?.gender;
+  // Format: "NOUN • masculine" if both exist, or just POS
+  const posDisplay = gender ? `${pos} • ${gender}` : pos;
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+    <div 
+      className="bg-white rounded-lg p-4 shadow-sm border border-gray-200 relative cursor-pointer hover:shadow-md transition-shadow"
+      onClick={onOpenDetail}
+    >
+      {/* Top section with star, word, badges, and unknown button */}
+      <div className="flex items-start gap-3 mb-3 pr-20">
+        {/* Star icon - yellow outlined when not favorited, filled when favorited */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(item.lemma.id);
+          }}
+          className="flex-shrink-0 mt-0.5 focus:outline-none"
+          title={favorites.has(item.lemma.id) ? 'Remove from favorites' : 'Add to favorites'}
+          aria-label={favorites.has(item.lemma.id) ? 'Remove from favorites' : 'Add to favorites'}
+        >
+          {favorites.has(item.lemma.id) ? (
+            <span className="text-xl">⭐</span>
+          ) : (
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+          )}
+        </button>
+        
         <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-3 mb-2">
-            <button
-              onClick={() => onToggleFavorite(item.lemma.id)}
-              className={`text-xl transition-transform hover:scale-110 ${
-                favorites.has(item.lemma.id) ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'
-              }`}
-              title={favorites.has(item.lemma.id) ? 'Remove from favorites' : 'Add to favorites'}
-              aria-label={favorites.has(item.lemma.id) ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              ⭐
-            </button>
-            <h3 className="text-lg sm:text-xl font-semibold text-gray-900 break-words">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <h3 className="text-lg font-bold text-gray-900 break-words">
               {item.lemma.lemma}
             </h3>
-            <AudioPlayer text={item.lemma.lemma} language={item.lemma.language} />
-            <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              {item.lemma.pos || 'NOUN'}
+            
+            {/* POS badge - light grey pill */}
+            <span className="text-xs text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-full font-medium">
+              {posDisplay.toUpperCase()}
             </span>
-            <span className="text-sm text-gray-500 break-words">
+            
+            {/* Frequency */}
+            <span className="text-xs text-gray-600">
               Frequency: {item.frequency_in_book}
             </span>
           </div>
           
-          <div className="space-y-2">
+          {/* Translation section */}
+          <div className="mb-3">
             {item.lemma.definition ? (
-              <p className="text-gray-700 font-medium break-words">
-                <span className="text-gray-600">Translation:</span>{' '}
-                <span className="break-words">{item.lemma.definition}</span>
+              <p className="text-sm text-gray-700 break-words">
+                <span className="text-gray-600 font-medium">Translation:</span>{' '}
+                {cleanTranslation(item.lemma.definition)}
               </p>
             ) : (
-              <p className="text-gray-500 italic text-sm">
+              <p className="text-xs text-gray-500 italic">
                 Translation not available
               </p>
             )}
-            
-            {wordForms && wordForms.length > 1 && (
-              <div className="text-sm text-gray-600">
-                <span className="font-medium">Word Forms:</span>{' '}
-                <span className="text-gray-700 break-words">{wordForms.join(', ')}</span>
-              </div>
+          </div>
+          
+          {/* Type, Conjugation, Form pills */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {type && (
+              <span className="text-xs text-gray-700 bg-gray-100 px-2.5 py-0.5 rounded-full">
+                {type}
+              </span>
             )}
-            
-            {grammarEntries.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {grammarEntries.map((entry) => (
-                  <span
-                    key={`${item.lemma.id}-${entry}`}
-                    className="text-xs text-gray-700 bg-gray-100 px-2 py-1 rounded-full break-words"
-                  >
-                    {entry}
-                  </span>
-                ))}
-              </div>
+            {conjugation && (
+              <span className="text-xs text-gray-700 bg-gray-100 px-2.5 py-0.5 rounded-full">
+                {conjugation}
+              </span>
+            )}
+            {form && (
+              <span className="text-xs text-gray-700 bg-gray-100 px-2.5 py-0.5 rounded-full">
+                {form}
+              </span>
             )}
           </div>
         </div>
         
-        <div className="sm:ml-4">
-          <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(item.status)}`}>
-            {item.status}
-          </span>
-        </div>
+        {/* Unknown button in top right */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onUpdateStatus(item.lemma.id, 'unknown');
+          }}
+          className="absolute top-4 right-4 text-xs px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full border border-blue-200 hover:bg-blue-200 transition-colors"
+        >
+          unknown
+        </button>
       </div>
       
-      <div className="mt-3 flex gap-2">
+      {/* Bottom action buttons */}
+      <div className="flex gap-2 pt-2 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => onUpdateStatus(item.lemma.id, 'learned')}
-          className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+          className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors flex items-center justify-center gap-1 ${
             item.status === 'learned'
-              ? 'bg-green-100 text-green-800 border-green-200'
+              ? 'bg-green-50 text-green-800 border-green-200'
               : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-green-50'
           }`}
         >
-          ✓ Learned
+          <span>✓</span>
+          <span>Learned</span>
         </button>
         <button
           onClick={() => onUpdateStatus(item.lemma.id, 'unknown')}
-          className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+          className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors flex items-center justify-center gap-1 ${
             item.status === 'unknown'
               ? 'bg-blue-100 text-blue-800 border-blue-200'
               : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-blue-50'
           }`}
         >
-          ❓ Unknown
-        </button>
-        <button
-          onClick={() => onUpdateStatus(item.lemma.id, 'ignored')}
-          className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-            item.status === 'ignored'
-              ? 'bg-gray-100 text-gray-800 border-gray-200'
-              : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
-          }`}
-        >
-          👁️ Ignore
+          <span>?</span>
+          <span>Unknown</span>
         </button>
       </div>
     </div>

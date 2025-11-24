@@ -98,7 +98,7 @@ const DemoExperience: React.FC = () => {
                 Start guided demo
               </button>
               <button
-                onClick={() => navigate('/onboarding')}
+                onClick={() => navigate('/')}
                 className="btn-secondary px-5 py-3 text-base"
               >
                 Create free account
@@ -355,10 +355,10 @@ const DemoExperience: React.FC = () => {
                 Back to homepage
               </button>
               <button
-                onClick={() => navigate('/onboarding')}
+                onClick={() => navigate('/')}
                 className="px-4 py-2 text-sm rounded-lg border border-white/40 hover:bg-white/10 transition"
               >
-                Continue to onboarding
+                Create account
               </button>
             </div>
           </div>

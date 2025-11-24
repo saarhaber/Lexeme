@@ -30,26 +30,50 @@ const VocabLists: React.FC = () => {
   const [loadingVocab, setLoadingVocab] = useState<boolean>(false);
 
   useEffect(() => {
+    console.log('VocabLists useEffect triggered:', { 
+      hasToken: !!token, 
+      listId: listId || 'none',
+      tokenLength: token?.length || 0
+    });
     if (token) {
       if (listId) {
+        console.log('Loading vocabulary for list:', listId);
+        // Reset vocabulary state when switching lists
+        setVocabulary([]);
+        setListName('');
         loadListVocabulary(parseInt(listId));
       } else {
+        console.log('Loading all lists');
         loadLists();
       }
+    } else {
+      console.warn('No token available, cannot load lists');
+      setLoading(false);
     }
   }, [token, listId]);
 
   const loadLists = async () => {
+    if (!token) {
+      console.error('loadLists called without token');
+      setLoading(false);
+      return;
+    }
     try {
+      console.log('Loading lists from:', `${API_BASE_URL}/vocab-lists/`);
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/vocab-lists/`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
+      console.log('Lists API response status:', response.status);
       if (response.ok) {
         const data = await response.json();
+        console.log('Lists data received:', data);
         setLists(data);
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to load lists:', response.status, errorText);
       }
     } catch (err) {
       console.error('Error loading lists:', err);
@@ -93,8 +117,14 @@ const VocabLists: React.FC = () => {
       const response = await apiGet(`/vocab-lists/${id}/vocabulary`, token);
       if (response.ok) {
         const data = await response.json();
+        console.log('Loaded vocabulary data:', JSON.stringify(data, null, 2));
+        console.log('Vocabulary items:', JSON.stringify(data.vocabulary, null, 2));
+        console.log('Vocabulary items count:', data.vocabulary?.length || 0);
         setVocabulary(data.vocabulary || []);
         setListName(data.list_name || '');
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to load vocabulary:', response.status, errorText);
       }
     } catch (err) {
       console.error('Error loading list vocabulary:', err);
@@ -130,7 +160,7 @@ const VocabLists: React.FC = () => {
   // If showing detail view
   if (listId) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-background">
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="mb-8 flex justify-between items-center">
             <div>
@@ -166,62 +196,74 @@ const VocabLists: React.FC = () => {
             <div className="bg-white rounded-lg shadow-md">
               <div className="p-6">
                 <div className="space-y-4">
-                  {vocabulary.map((item: any) => (
-                    <div key={item.lemma.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="text-xl font-semibold text-gray-900">
-                              {item.lemma.lemma}
-                            </h3>
-                            <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                              {item.lemma.pos || 'NOUN'}
-                            </span>
+                  {vocabulary.map((item: any, index: number) => {
+                    // Handle case where item might not have lemma structure
+                    const lemma = item?.lemma || item;
+                    const lemmaId = lemma?.id || item?.id || `item-${index}`;
+                    const word = lemma?.lemma || lemma?.word || 'Unknown word';
+                    const pos = lemma?.pos;
+                    const definition = lemma?.definition;
+                    const morphology = lemma?.morphology;
+                    
+                    return (
+                      <div key={lemmaId} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="text-xl font-semibold text-gray-900">
+                                {word}
+                              </h3>
+                              {pos && (
+                                <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                                  {pos}
+                                </span>
+                              )}
+                            </div>
+                            
+                            {definition ? (
+                              <p className="text-gray-700 mb-2 font-medium">
+                                <span className="text-gray-600">Translation:</span> {definition}
+                              </p>
+                            ) : (
+                              <p className="text-gray-500 mb-2 italic text-sm">
+                                Translation not available
+                              </p>
+                            )}
+                            
+                            {morphology && morphology.forms && Array.isArray(morphology.forms) && morphology.forms.length > 1 && (
+                              <div className="text-sm text-gray-600 mb-2">
+                                <span className="font-medium">Word Forms:</span>{' '}
+                                <span className="text-gray-700">{morphology.forms.join(', ')}</span>
+                              </div>
+                            )}
+                            
+                            {morphology && typeof morphology === 'object' && Object.keys(morphology).filter(k => k !== 'forms' && k !== 'form_count' && k !== 'root' && k !== 'prefixes' && k !== 'suffixes').length > 0 && (
+                              <div className="text-sm text-gray-600 mb-1">
+                                <span className="font-medium">Grammar:</span>{' '}
+                                {Object.entries(morphology)
+                                  .filter(([key]) => {
+                                    const excludeKeys = ['forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'];
+                                    return !excludeKeys.includes(key);
+                                  })
+                                  .map(([key, value]) => {
+                                    const keyFormatted = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
+                                    if (Array.isArray(value)) {
+                                      return `${keyFormatted}: ${value.join(', ')}`;
+                                    }
+                                    if (value === true || value === false) {
+                                      return value ? keyFormatted : '';
+                                    }
+                                    return `${keyFormatted}: ${value}`;
+                                  })
+                                  .filter(v => v)
+                                  .join(' • ')}
+                              </div>
+                            )}
                           </div>
-                          
-                          {item.lemma.definition ? (
-                            <p className="text-gray-700 mb-2 font-medium">
-                              <span className="text-gray-600">Translation:</span> {item.lemma.definition}
-                            </p>
-                          ) : (
-                            <p className="text-gray-500 mb-2 italic text-sm">
-                              Translation not available
-                            </p>
-                          )}
-                          
-                          {item.lemma.morphology && item.lemma.morphology.forms && item.lemma.morphology.forms.length > 1 && (
-                            <div className="text-sm text-gray-600 mb-2">
-                              <span className="font-medium">Word Forms:</span>{' '}
-                              <span className="text-gray-700">{item.lemma.morphology.forms.join(', ')}</span>
-                            </div>
-                          )}
-                          
-                          {item.lemma.morphology && Object.keys(item.lemma.morphology).filter(k => k !== 'forms' && k !== 'form_count' && k !== 'root' && k !== 'prefixes' && k !== 'suffixes').length > 0 && (
-                            <div className="text-sm text-gray-600 mb-1">
-                              <span className="font-medium">Grammar:</span>{' '}
-                              {Object.entries(item.lemma.morphology)
-                                .filter(([key]) => {
-                                  const excludeKeys = ['forms', 'form_count', 'root', 'prefixes', 'suffixes', 'derivations', 'inflections'];
-                                  return !excludeKeys.includes(key);
-                                })
-                                .map(([key, value]) => {
-                                  const keyFormatted = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
-                                  if (Array.isArray(value)) {
-                                    return `${keyFormatted}: ${value.join(', ')}`;
-                                  }
-                                  if (value === true || value === false) {
-                                    return value ? keyFormatted : '';
-                                  }
-                                  return `${keyFormatted}: ${value}`;
-                                })
-                                .filter(v => v)
-                                .join(' • ')}
-                            </div>
-                          )}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -233,59 +275,98 @@ const VocabLists: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading vocabulary lists...</p>
+      <div className="w-full">
+        <div
+          className="mx-auto w-full space-y-6 px-4 phone:px-5 py-6"
+          style={{ maxWidth: "var(--app-max-width)" }}
+        >
+          <div className="rounded-3xl border border-gray-100 bg-white/95 p-6 shadow-soft-card">
+            <div className="animate-pulse space-y-4">
+              <div className="h-8 bg-gray-200 rounded w-1/3"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="rounded-3xl border border-gray-100 bg-white/95 p-6 shadow-soft-card">
+                <div className="animate-pulse space-y-4">
+                  <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+                  <div className="h-4 bg-gray-200 rounded w-full"></div>
+                  <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        <div className="mb-8 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              📚 Vocabulary Lists
-            </h1>
-            <p className="text-gray-600">
-              Organize vocabulary into custom collections
-            </p>
+    <div className="w-full">
+      <div
+        className="mx-auto w-full space-y-6 px-4 phone:px-5 pb-4"
+        style={{ maxWidth: "var(--app-max-width)" }}
+      >
+        <div className="rounded-3xl border border-gray-100 bg-white/95 p-5 shadow-soft-card">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-400">
+                Vocabulary Lists
+              </p>
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <span aria-hidden="true">📝</span> My Lists
+              </h1>
+              <p className="mt-1 text-sm text-gray-600">
+                Organize vocabulary into custom collections
+              </p>
+            </div>
+            <button
+              onClick={() => setShowCreate(!showCreate)}
+              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <span className="mr-2" aria-hidden="true">+</span>
+              New List
+            </button>
           </div>
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            + New List
-          </button>
         </div>
 
         {showCreate && (
-          <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4">Create New List</h2>
+          <div className="rounded-3xl border border-gray-100 bg-white/95 p-6 shadow-soft-card">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Create New List</h2>
             <div className="space-y-4">
-              <input
-                type="text"
-                placeholder="List name"
-                value={newListName}
-                onChange={(e) => setNewListName(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-              />
-              <textarea
-                placeholder="Description (optional)"
-                value={newListDesc}
-                onChange={(e) => setNewListDesc(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                rows={3}
-              />
-              <div className="flex gap-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  List name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Italian Verbs, Travel Vocabulary"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description (optional)
+                </label>
+                <textarea
+                  placeholder="Add a description for this list..."
+                  value={newListDesc}
+                  onChange={(e) => setNewListDesc(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  rows={3}
+                />
+              </div>
+              <div className="flex gap-3">
                 <button
                   onClick={handleCreateList}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={!newListName.trim()}
+                  className="flex-1 rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 >
-                  Create
+                  Create List
                 </button>
                 <button
                   onClick={() => {
@@ -293,7 +374,7 @@ const VocabLists: React.FC = () => {
                     setNewListName('');
                     setNewListDesc('');
                   }}
-                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  className="rounded-full border border-gray-200 px-5 py-3 text-sm font-semibold text-gray-700 transition hover:border-gray-300 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
                 >
                   Cancel
                 </button>
@@ -303,16 +384,19 @@ const VocabLists: React.FC = () => {
         )}
 
         {lists.length === 0 ? (
-          <div className="bg-white shadow rounded-lg p-12 text-center">
-            <div className="text-6xl mb-4">📋</div>
-            <h3 className="text-lg font-medium text-gray-700 mb-2">No vocabulary lists yet</h3>
-            <p className="text-gray-500 mb-6">
-              Create your first list to organize vocabulary from your books
+          <div className="rounded-3xl border border-dashed border-gray-200 bg-white/80 p-12 text-center shadow-sm">
+            <div className="text-6xl mb-4" aria-hidden="true">📋</div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              No vocabulary lists yet
+            </h3>
+            <p className="mt-2 text-sm text-gray-600 mb-6">
+              Create your first list to organize vocabulary from your books. Lists help you group related words for focused study.
             </p>
             <button
               onClick={() => setShowCreate(true)}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
+              <span className="mr-2" aria-hidden="true">+</span>
               Create Your First List
             </button>
           </div>
@@ -321,30 +405,32 @@ const VocabLists: React.FC = () => {
             {lists.map((list) => (
               <div 
                 key={list.id} 
-                className="bg-white shadow rounded-lg p-6 cursor-pointer hover:shadow-lg transition-shadow"
+                className="rounded-3xl border border-gray-100 bg-white/95 p-5 shadow-soft-card cursor-pointer hover:-translate-y-1 hover:shadow-floating transition-all"
                 onClick={() => navigate(`/vocab-lists/${list.id}`)}
               >
                 <div className="flex justify-between items-start mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">{list.name}</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 line-clamp-2">{list.name}</h3>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleDeleteList(list.id);
                     }}
-                    className="text-red-500 hover:text-red-700"
+                    className="flex-shrink-0 ml-2 text-gray-400 hover:text-red-600 transition-colors"
+                    aria-label={`Delete ${list.name}`}
                   >
-                    ×
+                    <span className="text-xl">×</span>
                   </button>
                 </div>
                 {list.description && (
-                  <p className="text-sm text-gray-600 mb-4">{list.description}</p>
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{list.description}</p>
                 )}
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-500">
+                <div className="flex justify-between items-center pt-4 border-t border-gray-100">
+                  <span className="text-sm text-gray-600 flex items-center gap-1">
+                    <span aria-hidden="true">🔤</span>
                     {list.word_count} words
                   </span>
                   {list.is_public && (
-                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full font-semibold">
                       Public
                     </span>
                   )}

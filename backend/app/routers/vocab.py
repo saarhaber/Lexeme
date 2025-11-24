@@ -1,4 +1,5 @@
 import os
+import random
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Depends, status, BackgroundTasks
 from pydantic import BaseModel
@@ -90,6 +91,20 @@ def _format_morphology(existing: Any) -> dict:
         return dict(existing)
     return {}
 
+def _format_frequency(global_frequency: float) -> Optional[str]:
+    """Format global frequency as frequency level string."""
+    if global_frequency > 0.01:
+        return 'Very common'
+    elif global_frequency > 0.005:
+        return 'Common'
+    elif global_frequency > 0.001:
+        return 'Moderate'
+    elif global_frequency > 0.0001:
+        return 'Less common'
+    elif global_frequency > 0:
+        return 'Rare'
+    return None
+
 
 def _lemma_needs_enrichment(lemma: Lemma) -> bool:
     definition = (lemma.definition or "").strip()
@@ -104,7 +119,7 @@ def _lemma_needs_enrichment(lemma: Lemma) -> bool:
     return False
 
 
-def _enrich_lemma_if_needed(lemma: Lemma) -> Tuple[str, dict, str, bool]:
+def _enrich_lemma_if_needed(lemma: Lemma, db: Optional[Session] = None) -> Tuple[str, dict, str, bool]:
     """
     Ensure lemma has translation/grammar data. Returns tuple of
     (definition, morphology, pos, updated_flag).
@@ -131,10 +146,13 @@ def _enrich_lemma_if_needed(lemma: Lemma) -> Tuple[str, dict, str, bool]:
         return definition or "", morphology, pos or "", False
 
     try:
+        # Pass db session so DictionaryService can check database first
+        # This reuses definitions from previously processed books - no API call needed!
         dict_info = dictionary_service.get_word_info(
             lemma.lemma,
             language_code,
-            "en"
+            "en",
+            db=db  # Pass database session for database-first lookup
         )
     except Exception as exc:
         print(f"[Vocab] Dictionary lookup failed for '{lemma.lemma}': {exc}")
@@ -181,7 +199,7 @@ def _background_enrich_lemmas(lemma_ids: List[int]):
         lemmas = db.query(Lemma).filter(Lemma.id.in_(lemma_ids)).all()
         updated = False
         for lemma in lemmas:
-            _, _, _, changed = _enrich_lemma_if_needed(lemma)
+            _, _, _, changed = _enrich_lemma_if_needed(lemma, db)
             if changed:
                 updated = True
         if updated:
@@ -247,8 +265,23 @@ class LemmaResponse(BaseModel):
     morphology: dict
     global_frequency: float
 
+class WordEntry(BaseModel):
+    """Word entry matching frontend DemoWordEntry structure."""
+    word: str
+    translation: str
+    definition: str
+    pos: str
+    context: Optional[str] = None
+    cefr: Optional[str] = None
+    frequency: Optional[str] = None
+    notes: Optional[str] = None
+    forms: Optional[List[str]] = None
+    synonyms: Optional[List[str]] = None
+    tip: Optional[str] = None
+
 class VocabularyItem(BaseModel):
     lemma: LemmaResponse
+    word_entry: Optional[WordEntry] = None  # Rich word data matching frontend structure
     frequency_in_book: int
     difficulty_estimate: float
     status: str  # learned, unknown, ignored
@@ -294,7 +327,7 @@ def _build_vocabulary_items(
 
         if enrich_lemmas and _lemma_needs_enrichment(lemma):
             if sync_enriched < max_sync_enrichments:
-                definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma)
+                definition, morphology, pos, updated = _enrich_lemma_if_needed(lemma, db)
                 sync_enriched += 1
             elif len(background_queue) < max_background_queue:
                 background_queue.append(lemma.id)
@@ -306,6 +339,42 @@ def _build_vocabulary_items(
         normalized_status = _normalize_status_value(user_status_value)
         frequency_in_book = frequency_map.get(lemma.id, 0)
         
+        # Get rich word entry data matching frontend DemoWordEntry structure
+        word_entry = None
+        try:
+            # Get example sentence for context
+            example_context = None
+            if lemma.id in frequency_map:
+                # Try to get a token with sentence context
+                token_with_context = db.query(Token).filter(
+                    Token.lemma_id == lemma.id
+                ).filter(
+                    Token.sentence_context.isnot(None)
+                ).first()
+                if token_with_context and token_with_context.sentence_context:
+                    example_context = token_with_context.sentence_context
+            
+            # Get word entry in DemoWordEntry format
+            word_entry_data = dictionary_service.get_word_entry(
+                lemma.lemma,
+                lemma.language,
+                "en",
+                context=example_context,
+                db=db
+            )
+            word_entry = WordEntry(**word_entry_data)
+        except Exception as e:
+            print(f"[Vocab] Error creating word entry for {lemma.lemma}: {e}")
+            # Create minimal word entry if lookup fails
+            word_entry = WordEntry(
+                word=lemma.lemma,
+                translation=definition or "",
+                definition=definition or "",
+                pos=pos or lemma.pos or "",
+                context=example_context,
+                frequency=_format_frequency(lemma.global_frequency) if lemma.global_frequency else None
+            )
+        
         vocabulary_item = VocabularyItem(
             lemma=LemmaResponse(
                 id=lemma.id,
@@ -316,6 +385,7 @@ def _build_vocabulary_items(
                 morphology=morphology,
                 global_frequency=lemma.global_frequency or 0.0
             ),
+            word_entry=word_entry,
             frequency_in_book=frequency_in_book,
             difficulty_estimate=0.0,
             status=normalized_status,
@@ -434,54 +504,134 @@ async def get_book_vocabulary(
 async def get_swipe_session_vocabulary(
     book_id: int,
     limit: int = Query(200, ge=20, le=400),
+    offset: int = Query(0, ge=0),
     filter_status: Optional[str] = Query("unknown", regex="^(learned|known|learning|unknown|ignored)$"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user_real)
 ):
-    book = db.query(Book).filter(Book.id == book_id).first()
-    if not book:
-        raise HTTPException(status_code=404, detail="Book not found")
-    
+    """
+    Ultra-fast swipe session endpoint - optimized for maximum performance.
+    Returns minimal data with no enrichment for instant loading.
+    """
     user_id = current_user["user_id"]
     normalized_filter_status = _normalize_status_value(filter_status) if filter_status else None
-    overfetch_factor = 3
     
-    lemma_ids_subquery = db.query(Token.lemma_id).filter(Token.book_id == book_id).distinct().subquery()
+    # Ultra-fast path: Get lemma IDs directly from tokens (no joins needed)
+    # This is the fastest possible query
+    token_lemma_ids = db.query(Token.lemma_id).filter(
+        Token.book_id == book_id
+    ).distinct().all()
     
-    status_subquery = db.query(
-        UserVocabStatus.lemma_id.label("lemma_id"),
-        UserVocabStatus.status.label("status")
-    ).filter(UserVocabStatus.user_id == user_id).subquery()
+    if not token_lemma_ids:
+        return VocabularyResponse(
+            book_id=book_id,
+            vocabulary=[],
+            total_count=0,
+            page=1,
+            limit=0,
+            sort_by="swipe_session",
+            filter_status=normalized_filter_status
+        )
     
-    query = db.query(Lemma, status_subquery.c.status.label("user_status")).join(
-        lemma_ids_subquery, Lemma.id == lemma_ids_subquery.c.lemma_id
-    ).outerjoin(
-        status_subquery, Lemma.id == status_subquery.c.lemma_id
-    )
+    all_lemma_ids = [row[0] for row in token_lemma_ids]
     
-    filter_clause = _build_status_filter_clause(status_subquery.c.status, normalized_filter_status)
-    if filter_clause is not None:
-        query = query.filter(filter_clause)
+    # Get user statuses in one query (much faster than subquery)
+    user_statuses = db.query(
+        UserVocabStatus.lemma_id,
+        UserVocabStatus.status
+    ).filter(
+        UserVocabStatus.user_id == user_id,
+        UserVocabStatus.lemma_id.in_(all_lemma_ids)
+    ).all()
     
-    lemmas_with_status = query.order_by(func.random()).limit(limit * overfetch_factor).all()
-    lemma_ids = [lemma.id for lemma, _ in lemmas_with_status]
-    frequency_map = _build_frequency_map(db, book_id, lemma_ids)
+    status_map = {lemma_id: status for lemma_id, status in user_statuses}
     
-    vocabulary, _, _ = _build_vocabulary_items(
-        lemmas_with_status,
-        frequency_map,
-        False,
-        db
-    )
+    # Filter by status if needed
+    if normalized_filter_status:
+        if normalized_filter_status == "learned":
+            filtered_ids = [lid for lid, status in status_map.items() 
+                          if status and status.lower() in STATUS_LEARNED_VALUES]
+        elif normalized_filter_status == "unknown":
+            filtered_ids = [lid for lid in all_lemma_ids 
+                          if lid not in status_map or 
+                          (status_map.get(lid) and status_map[lid].lower() in STATUS_UNKNOWN_VALUES) or
+                          status_map.get(lid) is None]
+        else:
+            filtered_ids = [lid for lid, status in status_map.items() if status == normalized_filter_status]
+    else:
+        filtered_ids = all_lemma_ids
     
-    trimmed_vocabulary = vocabulary[:limit]
+    # For initial load, use smaller batch
+    initial_batch_size = 30 if offset == 0 else limit
+    actual_limit = min(initial_batch_size, limit)
+    
+    # Ultra-fast random sampling: Use Python random on IDs (faster than SQL random)
+    import random
+    if len(filtered_ids) > actual_limit:
+        # Sample random IDs without replacement
+        sampled_ids = random.sample(filtered_ids, min(actual_limit, len(filtered_ids)))
+    else:
+        sampled_ids = filtered_ids[:actual_limit]
+    
+    # Fetch lemmas directly by ID (indexed lookup - very fast)
+    lemmas = db.query(Lemma).filter(Lemma.id.in_(sampled_ids)).all()
+    
+    # Build frequency map in one query
+    frequency_results = db.query(
+        Token.lemma_id,
+        func.count(Token.id).label("frequency")
+    ).filter(
+        Token.book_id == book_id,
+        Token.lemma_id.in_(sampled_ids)
+    ).group_by(Token.lemma_id).all()
+    frequency_map = {lemma_id: frequency for lemma_id, frequency in frequency_results}
+    
+    # Build vocabulary items WITHOUT enrichment (ultra-fast)
+    vocabulary: List[VocabularyItem] = []
+    for lemma in lemmas:
+        user_status = status_map.get(lemma.id)
+        normalized_status = _normalize_status_value(user_status)
+        frequency_in_book = frequency_map.get(lemma.id, 0)
+        
+        # Create minimal word_entry from cached data (no API calls)
+        word_entry = None
+        if lemma.definition:
+            word_entry = WordEntry(
+                word=lemma.lemma,
+                translation=lemma.definition,
+                definition=lemma.definition,
+                pos=lemma.pos or "",
+                frequency=_format_frequency(lemma.global_frequency) if lemma.global_frequency else None
+            )
+        
+        vocabulary_item = VocabularyItem(
+            lemma=LemmaResponse(
+                id=lemma.id,
+                lemma=lemma.lemma,
+                language=lemma.language,
+                pos=lemma.pos or "",
+                definition=lemma.definition or "",
+                morphology=_format_morphology(lemma.morphology),
+                global_frequency=lemma.global_frequency or 0.0
+            ),
+            word_entry=word_entry,
+            frequency_in_book=frequency_in_book,
+            difficulty_estimate=0.0,
+            status=normalized_status,
+            example_sentences=[],
+            collocations=[]
+        )
+        vocabulary.append(vocabulary_item)
+    
+    # Only get total count for first page
+    total_count = len(filtered_ids) if offset == 0 else 0
     
     return VocabularyResponse(
         book_id=book_id,
-        vocabulary=trimmed_vocabulary,
-        total_count=len(trimmed_vocabulary),
-        page=1,
-        limit=limit,
+        vocabulary=vocabulary,
+        total_count=total_count,
+        page=(offset // limit) + 1 if limit > 0 else 1,
+        limit=actual_limit,
         sort_by="swipe_session",
         filter_status=normalized_filter_status
     )

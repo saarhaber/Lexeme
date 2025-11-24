@@ -65,7 +65,6 @@ const Navigation: React.FC = () => {
         icon: '📚',
         match: (pathname) => pathname === '/books' || pathname.startsWith('/book/'),
       },
-      { path: '/review', label: 'Review', icon: '🔁' },
       { path: '/progress', label: 'Progress', icon: '📈' },
       {
         path: '/vocab-lists',
@@ -73,7 +72,6 @@ const Navigation: React.FC = () => {
         icon: '📝',
         match: (pathname) => pathname.startsWith('/vocab-lists'),
       },
-      { path: '/settings', label: 'Settings', icon: '⚙️' },
       ...SHARED_NAV_ITEMS,
     ];
   }, [isAuthenticated]);
@@ -89,7 +87,7 @@ const Navigation: React.FC = () => {
   };
 
   const bottomNavItems = isAuthenticated
-    ? navItems.filter((item) => ['/books', '/review', '/progress', '/settings'].includes(item.path))
+    ? navItems.filter((item) => ['/books', '/progress'].includes(item.path))
     : [];
 
   return (
@@ -168,19 +166,21 @@ const Navigation: React.FC = () => {
                   key={item.path}
                   to={item.path}
                   onClick={closeMenu}
-                  className={`inline-flex items-center gap-1 rounded-full border px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-2 text-xs sm:text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 whitespace-nowrap ${
                     active
                       ? 'border-blue-500 bg-blue-50 text-blue-700'
                       : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
                   }`}
                   aria-current={active ? 'page' : undefined}
+                  title={item.label}
                 >
                   {item.icon && (
-                    <span className="text-lg" aria-hidden="true">
+                    <span className="text-base sm:text-lg" aria-hidden="true">
                       {item.icon}
                     </span>
                   )}
-                  <span>{item.label}</span>
+                  <span className="hidden sm:inline">{item.label}</span>
+                  <span className="sm:hidden">{item.label.length > 8 ? item.label.substring(0, 6) + '..' : item.label}</span>
                 </Link>
               );
             })}
@@ -209,16 +209,17 @@ const Navigation: React.FC = () => {
                     active ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'
                   }`}
                   aria-current={active ? 'page' : undefined}
+                  title={item.label}
                 >
                   <span
-                    className={`mb-1 flex h-10 w-10 items-center justify-center rounded-full text-lg ${
+                    className={`mb-1 flex h-10 w-10 items-center justify-center rounded-full text-lg transition-colors ${
                       active ? 'bg-blue-50' : 'bg-gray-100'
                     }`}
                     aria-hidden="true"
                   >
                     {item.icon}
                   </span>
-                  {item.label}
+                  <span className="whitespace-nowrap">{item.label}</span>
                 </Link>
               );
             })}

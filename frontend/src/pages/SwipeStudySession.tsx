@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { apiGet, apiPost } from '../utils/api';
+import { requestCache } from '../utils/requestCache';
 import AudioPlayer from '../components/AudioPlayer';
 
 interface Lemma {
@@ -14,11 +15,26 @@ interface Lemma {
   global_frequency: number;
 }
 
+interface WordEntry {
+  word: string;
+  translation: string;
+  definition: string;
+  pos: string;
+  context?: string;
+  cefr?: string;
+  frequency?: string;
+  notes?: string;
+  forms?: string[];
+  synonyms?: string[];
+  tip?: string;
+}
+
 interface VocabularyItem {
   lemma: Lemma;
+  word_entry?: WordEntry;  // Rich word data matching demo structure
   frequency_in_book: number;
   difficulty_estimate: number;
-  status: 'learned' | 'unknown' | 'ignored';
+  status: 'learned' | 'unknown';
   example_sentences: string[];
   collocations: string[];
 }
@@ -35,6 +51,11 @@ interface VocabList {
 interface SwipeSessionResponse {
   book_id: number;
   vocabulary: VocabularyItem[];
+  total_count: number;
+  page: number;
+  limit: number;
+  sort_by: string;
+  filter_status: string | null;
 }
 
 interface PendingUpdate {
@@ -121,7 +142,6 @@ const SwipeStudySession: React.FC = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showTranslation, setShowTranslation] = useState(false);
   const [cardPosition, setCardPosition] = useState<CardPosition>({ x: 0, y: 0, rotation: 0, opacity: 1 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -141,6 +161,8 @@ const SwipeStudySession: React.FC = () => {
   const isFlushingRef = useRef(false);
   const recentWordIdsRef = useRef<Set<number>>(new Set());
   const sessionSeenIdsRef = useRef<Set<number>>(new Set());
+  const prefetchOffsetRef = useRef<number>(30); // Track where we've loaded up to
+  const isPrefetchingRef = useRef<boolean>(false);
 
   // Load vocabulary
   // Close dropdown when clicking outside
@@ -156,22 +178,51 @@ const SwipeStudySession: React.FC = () => {
 
   const resetCardPosition = useCallback(() => {
     setCardPosition({ x: 0, y: 0, rotation: 0, opacity: 1 });
-    setShowTranslation(false);
   }, []);
 
-  const loadVocabulary = useCallback(async () => {
-    if (!bookId || !token) return;
+  const fetchTranslationForWord = useCallback(async (word: string, language: string): Promise<string | null> => {
+    // Fallback: Try to fetch translation from API if missing
+    if (!token) return null;
     try {
-      setLoading(true);
-      setError(null);
-      const endpoint = `/vocab/book/${bookId}/swipe-session?limit=${MAX_SESSION_WORDS}&filter_status=unknown`;
-      const response = await apiGet(endpoint, token);
-      if (!response.ok) {
-        throw new Error('Failed to load vocabulary');
-      }
-      const data: SwipeSessionResponse = await response.json();
-      const vocabulary: VocabularyItem[] = data.vocabulary || [];
+      // This would call an API endpoint to get translation
+      // For now, return null - the fallback chain in render will handle it
+      return null;
+    } catch (error) {
+      console.error('Failed to fetch translation:', error);
+      return null;
+    }
+  }, [token]);
 
+  const loadVocabulary = useCallback(async (initialLoad: boolean = true) => {
+    if (!bookId || !token) return;
+    
+    const INITIAL_BATCH_SIZE = 30; // Load first 30 words immediately
+    const BATCH_SIZE = 50; // Load remaining in batches
+    
+    try {
+      if (initialLoad) {
+        setLoading(true);
+        setError(null);
+      }
+      
+      // Load initial batch immediately for fast first render (with caching)
+      const initialEndpoint = `/vocab/book/${bookId}/swipe-session?limit=${INITIAL_BATCH_SIZE}&offset=0&filter_status=unknown`;
+      const cacheKey = `swipe-${bookId}-${INITIAL_BATCH_SIZE}-0`;
+      
+      const initialData: SwipeSessionResponse = await requestCache.get(
+        cacheKey,
+        async () => {
+          const initialResponse = await apiGet(initialEndpoint, token);
+          if (!initialResponse.ok) {
+            throw new Error('Failed to load vocabulary');
+          }
+          return await initialResponse.json();
+        },
+        10000 // Cache for 10 seconds
+      );
+      let vocabulary: VocabularyItem[] = initialData.vocabulary || [];
+
+      // Sanitize initial batch
       const sanitizedWords = vocabulary.map((item) => ({
         ...item,
         lemma: {
@@ -179,36 +230,111 @@ const SwipeStudySession: React.FC = () => {
           morphology: item.lemma.morphology || {}
         },
         example_sentences: item.example_sentences || [],
-        collocations: item.collocations || []
+        collocations: item.collocations || [],
+        word_entry: item.word_entry || (item.lemma.definition ? {
+          word: item.lemma.lemma,
+          translation: item.lemma.definition,
+          definition: item.lemma.definition,
+          pos: item.lemma.pos || '',
+        } : undefined)
       }));
 
       const dedupedMap = new Map<number, VocabularyItem>();
-      sanitizedWords
-        .filter((item) => item.status !== 'ignored')
-        .forEach((item) => {
-          if (!dedupedMap.has(item.lemma.id)) {
-            dedupedMap.set(item.lemma.id, item);
-          }
-        });
+      sanitizedWords.forEach((item) => {
+        if (!dedupedMap.has(item.lemma.id)) {
+          dedupedMap.set(item.lemma.id, item);
+        }
+      });
 
-      const uniqueWords = Array.from(dedupedMap.values());
       const storedRecentIds = new Set(readRecentSwipeHistory());
       recentWordIdsRef.current = storedRecentIds;
       sessionSeenIdsRef.current.clear();
 
-      const prioritizedWords = prioritizeVocabularyForSession(uniqueWords, storedRecentIds).slice(
-        0,
-        MAX_SESSION_WORDS
+      const prioritizedWords = prioritizeVocabularyForSession(
+        Array.from(dedupedMap.values()),
+        storedRecentIds
       );
 
+      // Set initial words immediately for fast render
       setWords(prioritizedWords);
       setCurrentIndex(0);
-      setShowTranslation(false);
       resetCardPosition();
+      setLoading(false); // Show UI immediately
+
+      // Load remaining words in background
+      const totalNeeded = MAX_SESSION_WORDS;
+      const remainingNeeded = Math.max(0, totalNeeded - INITIAL_BATCH_SIZE);
+      
+      if (remainingNeeded > 0 && initialData.total_count > INITIAL_BATCH_SIZE) {
+        // Load remaining words in batches
+        const batches = Math.ceil(remainingNeeded / BATCH_SIZE);
+        const allWords = [...prioritizedWords];
+        
+        for (let i = 0; i < batches; i++) {
+          const offset = INITIAL_BATCH_SIZE + (i * BATCH_SIZE);
+          const batchLimit = Math.min(BATCH_SIZE, remainingNeeded - (i * BATCH_SIZE));
+          
+          try {
+            const batchEndpoint = `/vocab/book/${bookId}/swipe-session?limit=${batchLimit}&offset=${offset}&filter_status=unknown`;
+            const batchCacheKey = `swipe-${bookId}-${batchLimit}-${offset}`;
+            
+            const batchData: SwipeSessionResponse = await requestCache.get(
+              batchCacheKey,
+              async () => {
+                const batchResponse = await apiGet(batchEndpoint, token);
+                if (!batchResponse.ok) {
+                  throw new Error('Failed to load vocabulary batch');
+                }
+                return await batchResponse.json();
+              },
+              10000
+            );
+            
+            if (batchData) {
+              const batchWords = (batchData.vocabulary || []).map((item) => ({
+                ...item,
+                lemma: {
+                  ...item.lemma,
+                  morphology: item.lemma.morphology || {}
+                },
+                example_sentences: item.example_sentences || [],
+                collocations: item.collocations || [],
+                word_entry: item.word_entry || (item.lemma.definition ? {
+                  word: item.lemma.lemma,
+                  translation: item.lemma.definition,
+                  definition: item.lemma.definition,
+                  pos: item.lemma.pos || '',
+                } : undefined)
+              }));
+
+              // Dedupe and add to existing words
+              batchWords.forEach((item) => {
+                if (!dedupedMap.has(item.lemma.id)) {
+                  dedupedMap.set(item.lemma.id, item);
+                  allWords.push(item);
+                }
+              });
+            }
+          } catch (batchError) {
+            console.warn('Failed to load vocabulary batch:', batchError);
+            // Continue with what we have
+          }
+        }
+
+        // Update with all loaded words, re-prioritize
+        const finalPrioritized = prioritizeVocabularyForSession(
+          allWords,
+          storedRecentIds
+        ).slice(0, MAX_SESSION_WORDS);
+
+        setWords(finalPrioritized);
+        prefetchOffsetRef.current = finalPrioritized.length;
+      } else {
+        prefetchOffsetRef.current = prioritizedWords.length;
+      }
     } catch (error) {
       console.error('Failed to load vocabulary:', error);
       setError('Failed to load vocabulary. Please check if the book has been processed.');
-    } finally {
       setLoading(false);
     }
   }, [bookId, token, resetCardPosition]);
@@ -367,10 +493,6 @@ const SwipeStudySession: React.FC = () => {
       opacity
     });
 
-    // Show translation on swipe up
-    if (deltaY < -50) {
-      setShowTranslation(true);
-    }
   };
 
   const handleEnd = () => {
@@ -388,11 +510,6 @@ const SwipeStudySession: React.FC = () => {
     else if (x < -threshold) {
       handleSwipe('unknown');
     }
-    // Swipe up (show translation) - already handled in handleMove
-    else if (y < -threshold) {
-      setShowTranslation(true);
-      resetCardPosition();
-    }
     // Return to center
     else {
       resetCardPosition();
@@ -401,6 +518,69 @@ const SwipeStudySession: React.FC = () => {
     // Reset drag delta
     currentDragDelta.current = { x: 0, y: 0 };
   };
+
+  // Prefetch next batch when user is near the end
+  const prefetchNextBatch = useCallback(async () => {
+    if (!bookId || !token || isPrefetchingRef.current) return;
+    
+    const PREFETCH_THRESHOLD = 10; // Prefetch when 10 words remaining
+    const remainingWords = words.length - currentIndex;
+    
+    if (remainingWords <= PREFETCH_THRESHOLD && words.length < MAX_SESSION_WORDS) {
+      isPrefetchingRef.current = true;
+      const BATCH_SIZE = 50;
+      const offset = prefetchOffsetRef.current;
+      
+      try {
+        const endpoint = `/vocab/book/${bookId}/swipe-session?limit=${BATCH_SIZE}&offset=${offset}&filter_status=unknown`;
+        const cacheKey = `swipe-${bookId}-${BATCH_SIZE}-${offset}`;
+        
+        const data: SwipeSessionResponse = await requestCache.get(
+          cacheKey,
+          async () => {
+            const response = await apiGet(endpoint, token);
+            if (!response.ok) {
+              throw new Error('Failed to prefetch vocabulary');
+            }
+            return await response.json();
+          },
+          10000
+        );
+        
+        if (data) {
+          const newWords = (data.vocabulary || []).map((item) => ({
+            ...item,
+            lemma: {
+              ...item.lemma,
+              morphology: item.lemma.morphology || {}
+            },
+            example_sentences: item.example_sentences || [],
+            collocations: item.collocations || [],
+            word_entry: item.word_entry || (item.lemma.definition ? {
+              word: item.lemma.lemma,
+              translation: item.lemma.definition,
+              definition: item.lemma.definition,
+              pos: item.lemma.pos || '',
+            } : undefined)
+          }));
+
+          setWords((prevWords) => {
+            const existingIds = new Set(prevWords.map(w => w.lemma.id));
+            const uniqueNewWords = newWords.filter(w => !existingIds.has(w.lemma.id));
+            if (uniqueNewWords.length > 0) {
+              prefetchOffsetRef.current += uniqueNewWords.length;
+              return [...prevWords, ...uniqueNewWords].slice(0, MAX_SESSION_WORDS);
+            }
+            return prevWords;
+          });
+        }
+      } catch (error) {
+        console.warn('Failed to prefetch vocabulary:', error);
+      } finally {
+        isPrefetchingRef.current = false;
+      }
+    }
+  }, [bookId, token, words, currentIndex]);
 
   const handleSwipe = async (status: 'learned' | 'unknown') => {
     if (currentIndex >= words.length) return;
@@ -417,9 +597,41 @@ const SwipeStudySession: React.FC = () => {
     
     queueStatusUpdate(currentWord.lemma.id, status);
     
+    // If marked as learned, remove it from the words array immediately
+    if (status === 'learned') {
+      setWords((prevWords) => {
+        const filtered = prevWords.filter((w) => w.lemma.id !== currentWord.lemma.id);
+        // If no words left, session is complete
+        if (filtered.length === 0) {
+          setTimeout(async () => {
+            await flushPendingUpdates(true);
+            alert('Study session complete! 🎉');
+            navigate('/books');
+          }, 100);
+        } else {
+          // Adjust currentIndex if it's now out of bounds (e.g., we removed the last word)
+          setCurrentIndex((prevIndex) => {
+            if (prevIndex >= filtered.length) {
+              return Math.max(0, filtered.length - 1);
+            }
+            return prevIndex;
+          });
+        }
+        return filtered;
+      });
+      // Don't increment index - the array shifts, so the next word is now at currentIndex
+      resetCardPosition();
+      // Prefetch if needed
+      setTimeout(() => prefetchNextBatch(), 100);
+      return;
+    }
+    
+    // For unknown status, just move to next word
     if (currentIndex < words.length - 1) {
       setCurrentIndex((prev) => prev + 1);
       resetCardPosition();
+      // Prefetch if approaching end
+      setTimeout(() => prefetchNextBatch(), 100);
     } else {
       await flushPendingUpdates(true);
       alert('Study session complete! 🎉');
@@ -512,18 +724,6 @@ const SwipeStudySession: React.FC = () => {
     handleEnd();
   };
 
-  // Click to reveal translation
-  const handleCardClick = (e: React.MouseEvent) => {
-    // Only handle click if we didn't drag
-    if (!hasDragged.current) {
-      e.stopPropagation();
-      setShowTranslation(!showTranslation);
-    }
-    // Reset drag flag after a short delay
-    setTimeout(() => {
-      hasDragged.current = false;
-    }, 100);
-  };
 
   if (loading) {
     return (
@@ -579,9 +779,7 @@ const SwipeStudySession: React.FC = () => {
           <div className="text-6xl mb-4">📚</div>
           <h2 className="text-2xl font-bold text-gray-900 mb-4">No Words Available</h2>
           <p className="text-gray-600 mb-6">
-            {words.length === 0 
-              ? "This book doesn't have any vocabulary words yet. The book may still be processing, or vocabulary extraction may have failed."
-              : "All words in this book are marked as ignored."}
+            This book doesn't have any vocabulary words yet. The book may still be processing, or vocabulary extraction may have failed.
           </p>
           <div className="flex flex-col gap-3">
             <button
@@ -683,7 +881,6 @@ const SwipeStudySession: React.FC = () => {
             onTouchMove={onTouchMove}
             onTouchEnd={onTouchEnd}
             onMouseDown={onMouseDown}
-            onClick={handleCardClick}
           >
             {/* Swipe indicators */}
             {cardPosition.x > 50 && (
@@ -698,85 +895,168 @@ const SwipeStudySession: React.FC = () => {
             )}
 
             {/* Card Content */}
-            <div className="p-8 pb-20">
-              {/* Audio Button */}
-              <div className="flex justify-end mb-4">
-                <AudioPlayer text={currentWord.lemma.lemma} language={currentWord.lemma.language} />
-              </div>
-
-              {/* Word */}
-              <div className="text-center mb-6">
-                <h2 className="text-5xl md:text-6xl font-bold text-gray-900 mb-3">
-                  {currentWord.lemma.lemma}
-                </h2>
-                <div className="flex items-center justify-center gap-3">
-                  <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
-                    {currentWord.lemma.pos}
-                  </span>
-                  <span className="text-sm text-gray-500">
-                    {currentWord.frequency_in_book}x
-                  </span>
+            <div className="p-6 pb-24">
+              {/* Title: Definition & pronunciation */}
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-sm font-semibold text-gray-700">Definition & pronunciation</h3>
+                {/* Audio Button - Top Right (small blue square with speaker icon) */}
+                <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center shadow-sm hover:bg-blue-600 transition-colors">
+                  <AudioPlayer 
+                    text={currentWord.lemma.lemma} 
+                    language={currentWord.lemma.language}
+                  />
                 </div>
               </div>
 
-              {/* Translation (revealed on swipe up or click) */}
-              {showTranslation && (
-                <div className="mt-6 pt-6 border-t border-gray-200 animate-fadeIn">
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Translation</h3>
-                    <p className="text-xl text-gray-800 leading-relaxed">
-                      {currentWord.lemma.definition || 'No definition available'}
-                    </p>
+              {/* Word with POS, Gender, and CEFR badges */}
+              <div className="mb-5">
+                  <h2 className="text-5xl md:text-6xl font-bold text-gray-900 mb-3 lowercase tracking-tight leading-tight">
+                    {currentWord.lemma.lemma}
+                  </h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(() => {
+                      const pos = currentWord.word_entry?.pos?.toUpperCase() || currentWord.lemma.pos?.toUpperCase() || '';
+                      const morphology = currentWord.lemma?.morphology || {};
+                      const gender = morphology.gender;
+                      
+                      // Combine POS and gender into one badge if both exist
+                      let badgeText = pos;
+                      if (gender && pos) {
+                        badgeText = `${pos} • ${gender}`;
+                      } else if (gender && !pos) {
+                        badgeText = gender;
+                      } else if (!pos) {
+                        badgeText = 'NOUN';
+                      }
+                      
+                      return (
+                        <span className="px-4 py-1.5 bg-purple-500 text-white rounded-full text-xs font-medium">
+                          {badgeText}
+                        </span>
+                      );
+                    })()}
+                    {currentWord.word_entry?.cefr && (
+                      <span className="px-4 py-1.5 bg-blue-200 text-blue-800 rounded-full text-xs font-medium">
+                        CEFR {currentWord.word_entry.cefr}
+                      </span>
+                    )}
                   </div>
+                </div>
 
-                  {/* Grammar/Morphology */}
-                  {currentWord.lemma.morphology && Object.keys(currentWord.lemma.morphology).length > 0 && (
-                    <div className="mb-4">
-                      <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Grammar</h3>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(currentWord.lemma.morphology).slice(0, 3).map(([key, value]) => (
-                          <span
-                            key={key}
-                            className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded text-xs"
-                          >
-                            {key}: {String(value)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+              {/* English Translation */}
+              <div className="mb-4">
+                <p className="text-base text-gray-900 font-normal">
+                  {(() => {
+                    // Helper function to clean translation text (remove plural, gender prefixes, etc.)
+                    const cleanTranslation = (text: string): string => {
+                      if (!text) return '';
+                      // Split by newlines and filter out lines starting with unwanted prefixes
+                      const lines = text.split('\n').filter(line => {
+                        const trimmed = line.trim();
+                        return trimmed && 
+                          !trimmed.toLowerCase().startsWith('plural:') &&
+                          !trimmed.toLowerCase().startsWith('feminine:') &&
+                          !trimmed.toLowerCase().startsWith('masculine:') &&
+                          !trimmed.toLowerCase().startsWith('root:') &&
+                          !trimmed.toLowerCase().startsWith('prefix:') &&
+                          !trimmed.toLowerCase().startsWith('suffix:');
+                      });
+                      // Join and clean up
+                      return lines.join(' ').trim();
+                    };
 
-                  {/* Examples */}
-                  {currentWord.example_sentences && currentWord.example_sentences.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Examples</h3>
-                      {currentWord.example_sentences.slice(0, 2).map((example, idx) => (
-                        <p key={idx} className="text-sm text-gray-600 italic mb-2">
-                          "{example}"
-                        </p>
-                      ))}
-                    </div>
-                  )}
+                    const translation = 
+                      cleanTranslation(currentWord.word_entry?.translation || '') ||
+                      cleanTranslation(currentWord.word_entry?.definition || '') ||
+                      cleanTranslation(currentWord.lemma.definition || '') ||
+                      currentWord.lemma.lemma;
+                    return translation;
+                  })()}
+                </p>
+              </div>
+
+              {/* Example phrase with yellow bar */}
+              {(currentWord.word_entry?.context || (currentWord.example_sentences && currentWord.example_sentences.length > 0)) && (
+                <div className="flex gap-3 mb-5">
+                  <div className="w-1 h-auto bg-yellow-400 rounded-full flex-shrink-0 self-stretch"></div>
+                  <p className="text-sm text-gray-600 italic leading-relaxed flex-1">
+                    {currentWord.word_entry?.context || currentWord.example_sentences[0]}
+                  </p>
                 </div>
               )}
 
-              {/* Hint to swipe up */}
-              {!showTranslation && (
-                <div className="text-center mt-6">
-                  <p className="text-sm text-gray-400 animate-bounce">↑ Swipe up or tap to reveal</p>
+              {/* Info buttons: Frequency, Forms, Synonyms */}
+              <div className="flex flex-wrap gap-2 mb-5">
+                {currentWord.word_entry?.frequency && (
+                  <div className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-medium whitespace-nowrap">
+                    Frequency: {currentWord.word_entry.frequency}
+                  </div>
+                )}
+                {currentWord.word_entry?.forms && currentWord.word_entry.forms.length > 0 && (
+                  <div className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-medium">
+                    Forms: {currentWord.word_entry.forms.slice(0, 5).join(', ')}
+                    {currentWord.word_entry.forms.length > 5 && ` +${currentWord.word_entry.forms.length - 5} more`}
+                  </div>
+                )}
+                {currentWord.word_entry?.synonyms && currentWord.word_entry.synonyms.length > 0 && (
+                  <div className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-medium">
+                    Related: {currentWord.word_entry.synonyms.join(', ')}
+                  </div>
+                )}
+                {/* Show grammar tags from morphology (reflexive, conjugation type, etc.) - excluding gender and number */}
+                {(() => {
+                  const morphology = currentWord.lemma?.morphology || {};
+                  const grammarTags = [];
+                  
+                  // Check for reflexive
+                  if (morphology.reflexive || morphology.conjugation_type === 'reflexive' || 
+                      currentWord.lemma.lemma?.endsWith('si') || currentWord.lemma.lemma?.endsWith('rsi')) {
+                    grammarTags.push('reflexive');
+                  }
+                  
+                  // Check for conjugation type
+                  if (morphology.conjugation) {
+                    grammarTags.push(morphology.conjugation);
+                  }
+                  
+                  // Check for other grammar features (excluding gender and number which are shown with POS)
+                  if (morphology.type) {
+                    grammarTags.push(morphology.type);
+                  }
+                  
+                  // Explicitly exclude gender and number - they're shown with POS badge above
+                  
+                  if (grammarTags.length > 0) {
+                    return (
+                      <div className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-medium">
+                        {grammarTags.join(' • ')}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+
+              {/* Tip box - Light blue background */}
+              {currentWord.word_entry?.tip && (
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mt-4">
+                  <p className="text-sm text-blue-700 leading-relaxed">
+                    {currentWord.word_entry.tip}
+                  </p>
                 </div>
               )}
             </div>
 
-            {/* Add to List Button */}
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+            {/* Add to List Button - Circular gradient button at bottom */}
+            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2">
               <div className="relative" ref={dropdownRef}>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowListDropdown(!showListDropdown);
                   }}
-                  className="w-12 h-12 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-full shadow-lg flex items-center justify-center text-white text-xl hover:scale-110 transition-transform"
+                  className="w-16 h-16 bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 rounded-full shadow-xl flex items-center justify-center text-white text-2xl font-light hover:scale-110 transition-transform"
+                  aria-label="Add to list"
                 >
                   +
                 </button>

@@ -41,6 +41,8 @@ psycopg2-binary==2.9.9
 # OAuth
 authlib==1.3.0
 httpx==0.25.2
+requests==2.31.0  # For dictionary/translation API calls
+wiktextract>=1.99.0  # For parsing Wiktionary data
 
 # Optional: For production
 # redis==5.0.1  # For caching

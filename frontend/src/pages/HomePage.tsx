@@ -276,12 +276,7 @@ const HomePage: React.FC = () => {
       await login(loginData.username, loginData.password);
       setIsLoggingIn(false);
       showToast('Welcome back!', 'success');
-      const onboardingCompleted = localStorage.getItem('onboarding_completed');
-      if (onboardingCompleted) {
-        navigate('/books');
-      } else {
-        navigate('/onboarding');
-      }
+      navigate('/books');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Login failed';
       setAuthErrors((prev) => ({ ...prev, login: errorMsg }));
@@ -297,7 +292,7 @@ const HomePage: React.FC = () => {
       await register(registerData.username, registerData.email, registerData.password);
       setIsRegistering(false);
       showToast('Account created successfully!', 'success');
-      navigate('/onboarding');
+      navigate('/books');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Registration failed';
       setAuthErrors((prev) => ({ ...prev, register: errorMsg }));
@@ -333,12 +328,6 @@ const HomePage: React.FC = () => {
           >
             <span aria-hidden="true">🎯</span> Try the interactive demo
           </button>
-          <button
-            onClick={() => navigate('/onboarding')}
-            className="px-6 py-3 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all duration-200 transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-          >
-            Start guided onboarding
-          </button>
         </div>
 
         {isAuthenticated && user && (
@@ -356,12 +345,6 @@ const HomePage: React.FC = () => {
         )}
 
           <div className="card max-w-2xl mx-auto mb-10 text-left">
-            <div className="mb-6">
-              <h2 className="text-2xl font-heading font-semibold text-gray-900">Get Started</h2>
-              <p className="text-sm text-gray-600">
-                Choose the path that matches where you are in your reading journey.
-              </p>
-            </div>
 
             {uploadError && (
               <div className="mb-4">
@@ -571,7 +554,7 @@ const HomePage: React.FC = () => {
                       {isRegistering ? 'Creating your space...' : 'Create Account'}
                     </button>
                     <p className="text-xs text-gray-500">
-                      You'll go through a quick onboarding flow so Lexeme can tailor reviews to you.
+                      Start uploading books and building your vocabulary library.
                     </p>
                   </form>
                 </section>

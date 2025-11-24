@@ -935,7 +935,12 @@ class ComprehensiveVocabularyProcessor:
                             pass
         
         # Group words by lemma using batch-processed spaCy info
+        # IMPORTANT: Normalize clitic forms (e.g., "conocerla" -> "conocere") before grouping
         lemma_groups = {}  # lemma -> list of (word, data, spacy_info)
+        
+        # Import dictionary service for normalization (handles clitics properly)
+        from .dictionary_service import DictionaryService
+        dict_normalizer = DictionaryService()
         
         for word, data in analysis['vocabulary'].items():
             word_lower = word.lower().strip()
@@ -944,20 +949,34 @@ class ComprehensiveVocabularyProcessor:
             if not word_lower or len(word_lower) < 2:
                 continue
             
-            # Get spaCy info from batch processing
-            if word_lower in word_to_spacy:
-                spacy_info = word_to_spacy[word_lower]
+            # CRITICAL: Normalize clitic forms BEFORE getting spaCy lemma
+            # This ensures "conocerla" -> "conocere" before grouping
+            normalized_word = dict_normalizer.normalize_word_form(word_lower, language)
+            
+            # Get spaCy info from batch processing (use normalized word for lookup if available)
+            spacy_lookup_key = normalized_word if normalized_word in word_to_spacy else word_lower
+            if spacy_lookup_key in word_to_spacy:
+                spacy_info = word_to_spacy[spacy_lookup_key]
                 lemma = spacy_info['lemma']
                 
-                # Validate lemma: if it's too short or seems broken, use the word itself
+                # Validate lemma: if it's too short or seems broken, use normalized word
                 # spaCy sometimes returns incomplete lemmas (e.g., "scus" instead of "scusare")
-                if not lemma or len(lemma) < 3 or lemma == word_lower[:len(lemma)]:
-                    # Use the word itself as lemma if spaCy's lemma is broken
-                    lemma = word_lower
+                if not lemma or len(lemma) < 3 or lemma == normalized_word[:len(lemma)]:
+                    # Use normalized word as lemma if spaCy's lemma is broken
+                    lemma = normalized_word
             else:
-                # Fallback: use word itself (don't use word family categories)
-                lemma = word_lower
-                spacy_info = {'pos': 'X', 'tag': 'X', 'morph': {}, 'lemma': lemma}
+                # Fallback: use normalized word (not original word)
+                lemma = normalized_word
+                # Try to get spaCy info for normalized word
+                if normalized_word != word_lower and normalized_word in word_to_spacy:
+                    spacy_info = word_to_spacy[normalized_word]
+                else:
+                    # Create minimal spacy_info for words with clitics
+                    spacy_info = {'pos': 'X', 'tag': 'X', 'morph': {}, 'lemma': lemma}
+            
+            # CRITICAL: Use normalized form as lemma to ensure clitic forms are grouped together
+            # For example: "conocerla", "conocerlo", "conocerle" all group under "conocere"
+            lemma = normalized_word
             
             # Skip empty lemmas or category names (not actual words)
             if not lemma or len(lemma) < 2:
@@ -966,8 +985,8 @@ class ComprehensiveVocabularyProcessor:
             # Skip if lemma is a grammatical category name (not an actual word)
             category_names = {'article', 'preposition', 'conjunction', 'pronoun', 'adverb', 'adjective', 'noun', 'verb'}
             if lemma.lower() in category_names:
-                # Use the word itself instead of the category
-                lemma = word_lower
+                # Use the normalized word itself instead of the category
+                lemma = normalized_word
                 
             if lemma not in lemma_groups:
                 lemma_groups[lemma] = []
@@ -994,8 +1013,35 @@ class ComprehensiveVocabularyProcessor:
         
         for lemma, word_list in lemma_groups.items():
             try:
-                # Get the most frequent word form as the canonical form
-                word_list.sort(key=lambda x: x[1].get('frequency', 0), reverse=True)
+                # CRITICAL: Prefer base/infinitive form as canonical, even if less frequent
+                # This ensures "conocerla" appears under "conocere", not as separate entry
+                # Sort by: 1) base form (infinitive/lemma) if it exists, 2) frequency
+                def sort_key(x):
+                    word_key, word_data, _ = x
+                    word_lower = word_key.lower().strip()
+                    freq = word_data.get('frequency', 0)
+                    
+                    # Prefer the lemma itself if it appears in the word list
+                    if word_lower == lemma:
+                        return (0, -freq)  # Base form first, then by frequency
+                    
+                    # For verbs, prefer infinitive forms (ends with -are, -ere, -ire for Italian)
+                    if language in ['it', 'es', 'fr']:
+                        if language == 'it' and word_lower.endswith(('are', 'ere', 'ire', 'irsi', 'arsi', 'ersi')):
+                            # Prefer infinitives, especially non-reflexive ones
+                            if word_lower.endswith(('are', 'ere', 'ire')):
+                                return (1, -freq)  # Non-reflexive infinitives
+                            else:
+                                return (2, -freq)  # Reflexive infinitives
+                        elif language == 'es' and word_lower.endswith(('ar', 'er', 'ir')):
+                            return (1, -freq)
+                        elif language == 'fr' and word_lower.endswith(('er', 'ir', 're')):
+                            return (1, -freq)
+                    
+                    # Otherwise, sort by frequency (higher frequency first)
+                    return (3, -freq)
+                
+                word_list.sort(key=sort_key)
                 canonical_word_key, canonical_data, canonical_spacy = word_list[0]
                 
                 # Use the ORIGINAL capitalization from the data, not the lowercase key
@@ -1063,12 +1109,19 @@ class ComprehensiveVocabularyProcessor:
                 spacy_tag = canonical_spacy.get('tag', 'X')
                 spacy_morph = canonical_spacy.get('morph', {})
                 
-                # SKIP dictionary lookups during initial processing for performance
-                # Dictionary lookups are slow (HTTP requests with delays) and block processing
-                # Can be added later as a background job if needed
+                # SMART dictionary lookup: Check database first, only call APIs for new words
+                # This way the dictionary grows organically - once a word is looked up, it's reused!
                 dict_info = {}
-                # Dictionary lookups disabled for now - too slow for 30k+ words
-                # if dictionary_service:
+                if dictionary_service:
+                    try:
+                        # Pass db session - DictionaryService will check database first
+                        # If word exists in DB with definition, no API call needed!
+                        dict_info = dictionary_service.get_word_info(lemma, language, "en", db=db)
+                    except Exception as e:
+                        print(f"Dictionary lookup failed for '{lemma}': {e}")
+                        dict_info = {}
+                # Note: Dictionary lookups are now smart - they check DB first
+                # Only new words trigger API calls, making it much faster
                 #     # Check if we should skip this word (common function words)
                 #     common_words_skip_dict = {
                 #         'it': {'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'di', 'a', 'da', 'in', 'con', 'su', 'per', 'e', 'che', 'è', 'sono'},

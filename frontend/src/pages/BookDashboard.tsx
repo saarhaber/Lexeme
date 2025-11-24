@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { apiGet } from "../utils/api";
 import ProgressIndicator from "../components/ProgressIndicator";
 import AchievementBadge from "../components/AchievementBadge";
-import SkeletonCard from "../components/SkeletonCard";
+import SkeletonLoader from "../components/SkeletonLoader";
 import LoadingOverlay from "../components/LoadingOverlay";
 
 interface Book {
@@ -58,13 +58,36 @@ const BookDashboard: React.FC = () => {
   useEffect(() => {
     const fetchBook = async () => {
       try {
-        const response = await apiGet(`/books/${bookId}`, token);
-        if (!response.ok) {
+        // Load book data first (critical path)
+        const bookResponse = await apiGet(`/books/${bookId}`, token);
+        if (!bookResponse.ok) {
           throw new Error("Failed to load book");
         }
-        const bookData = await response.json();
+        const bookData = await bookResponse.json();
         setBook(bookData);
-        setLoading(false);
+        setLoading(false); // Show UI immediately with book info
+        
+        // Load other data in parallel (non-blocking)
+        Promise.all([
+          apiGet(`/reading/book/${bookId}/progress`, token).then(r => r.ok ? r.json() : null).catch(() => null),
+          apiGet(`/vocab/book/${bookId}?limit=1000`, token).then(r => r.ok ? r.json() : null).catch(() => null)
+        ]).then(([progressData, vocabData]) => {
+          if (progressData) {
+            setReadingProgress(progressData);
+          }
+          if (vocabData) {
+            const vocabulary = vocabData.vocabulary || [];
+            const stats: VocabularyStats = {
+              learned: vocabulary.filter((v: any) => v.status === "learned").length,
+              unknown: vocabulary.filter((v: any) => v.status === "unknown").length,
+              total: vocabulary.length,
+            };
+            setVocabStats(stats);
+          }
+        }).catch(err => {
+          console.error("Failed to load additional data:", err);
+          // Non-critical, continue with book data
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load book");
         setLoading(false);
@@ -134,29 +157,10 @@ const BookDashboard: React.FC = () => {
     return () => clearInterval(intervalId);
   }, [bookId, token, book]);
 
-  // Fetch reading progress
+  // Poll for vocabulary updates when processing (only if not already loaded)
   useEffect(() => {
-    const fetchReadingProgress = async () => {
-      if (!bookId || !token) return;
-      try {
-        const response = await apiGet(
-          `/reading/book/${bookId}/progress`,
-          token,
-        );
-        if (response.ok) {
-          const progress = await response.json();
-          setReadingProgress(progress);
-        }
-      } catch (err) {
-        console.error("Failed to load reading progress:", err);
-      }
-    };
-
-    fetchReadingProgress();
-  }, [bookId, token]);
-
-  // Fetch vocabulary statistics - poll for updates when processing
-  useEffect(() => {
+    if (!book || book.processing_status !== "processing" || vocabStats) return;
+    
     const fetchVocabStats = async () => {
       if (!bookId || !token) return;
       try {
@@ -182,14 +186,9 @@ const BookDashboard: React.FC = () => {
       }
     };
 
-    fetchVocabStats();
-
-    // Poll for vocabulary updates if book is still processing
-    if (book && book.processing_status === "processing") {
-      const intervalId = setInterval(fetchVocabStats, 2000); // Poll every 2 seconds
-      return () => clearInterval(intervalId);
-    }
-  }, [bookId, token, book?.processing_status]);
+    const intervalId = setInterval(fetchVocabStats, 2000); // Poll every 2 seconds
+    return () => clearInterval(intervalId);
+  }, [bookId, token, book?.processing_status, vocabStats]);
 
   // Calculate vocabulary mastery level
   const getMasteryLevel = (): {
@@ -252,11 +251,14 @@ const BookDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto p-6">
-        <SkeletonCard variant="book" />
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-          <SkeletonCard variant="generic" />
-          <SkeletonCard variant="generic" />
+      <div
+        className="mx-auto w-full space-y-6 px-4 phone:px-5 py-6"
+        style={{ maxWidth: "var(--app-max-width)" }}
+      >
+        <SkeletonLoader variant="book" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <SkeletonLoader variant="card" />
+          <SkeletonLoader variant="card" />
         </div>
       </div>
     );
@@ -264,16 +266,46 @@ const BookDashboard: React.FC = () => {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg text-red-600">Error: {error}</div>
+      <div
+        className="mx-auto w-full px-4 phone:px-5 py-6"
+        style={{ maxWidth: "var(--app-max-width)" }}
+      >
+        <div className="rounded-3xl border border-red-200 bg-red-50 p-8 text-center">
+          <div className="text-5xl mb-4" aria-hidden="true">⚠️</div>
+          <h2 className="text-xl font-semibold text-red-900 mb-2">Error loading book</h2>
+          <p className="text-red-700 mb-6">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="inline-flex items-center justify-center rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700"
+          >
+            <span className="mr-2" aria-hidden="true">🔄</span>
+            Reload Page
+          </button>
+        </div>
       </div>
     );
   }
 
   if (!book) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg text-gray-600">Book not found</div>
+      <div
+        className="mx-auto w-full px-4 phone:px-5 py-6"
+        style={{ maxWidth: "var(--app-max-width)" }}
+      >
+        <div className="rounded-3xl border border-dashed border-gray-200 bg-white/80 p-12 text-center shadow-sm">
+          <div className="text-6xl mb-4" aria-hidden="true">📚</div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Book not found</h2>
+          <p className="text-sm text-gray-600 mb-6">
+            The book you're looking for doesn't exist or may have been deleted.
+          </p>
+          <a
+            href="/books"
+            className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            <span className="mr-2" aria-hidden="true">←</span>
+            Back to My Books
+          </a>
+        </div>
       </div>
     );
   }
@@ -629,12 +661,6 @@ const BookDashboard: React.FC = () => {
             className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300"
           >
             ← Upload Another Book
-          </button>
-          <button
-            onClick={() => navigate("/settings")}
-            className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300"
-          >
-            ⚙️ Settings
           </button>
           <button
             onClick={() => navigate("/progress")}

@@ -84,29 +84,55 @@ const ProgressDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading your progress...</p>
+      <div className="w-full">
+        <div
+          className="mx-auto w-full space-y-6 px-4 phone:px-5 py-6"
+          style={{ maxWidth: "var(--app-max-width)" }}
+        >
+          <div className="rounded-3xl border border-gray-100 bg-white/95 p-6 shadow-soft-card">
+            <div className="animate-pulse space-y-4">
+              <div className="h-8 bg-gray-200 rounded w-1/3"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="rounded-3xl border border-gray-100 bg-white/95 p-5 shadow-soft-card">
+                <div className="animate-pulse space-y-3">
+                  <div className="h-8 w-8 bg-gray-200 rounded"></div>
+                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                  <div className="h-6 bg-gray-200 rounded w-1/2"></div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            📊 Your Progress Dashboard
-          </h1>
-          <p className="text-gray-600">
-            Track your vocabulary learning journey
-          </p>
+    <div className="w-full">
+      <div
+        className="mx-auto w-full space-y-6 px-4 phone:px-5 pb-4"
+        style={{ maxWidth: "var(--app-max-width)" }}
+      >
+        <div className="rounded-3xl border border-gray-100 bg-white/95 p-5 shadow-soft-card">
+          <div className="mb-2">
+            <p className="text-xs uppercase tracking-wide text-gray-400">
+              Progress
+            </p>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <span aria-hidden="true">📊</span> Your Progress Dashboard
+            </h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Track your vocabulary learning journey
+            </p>
+          </div>
         </div>
 
         {/* SRS Statistics */}
-        {srsStats && (
+        {srsStats ? (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div className="bg-white overflow-hidden shadow rounded-lg">
               <div className="p-5">
@@ -188,56 +214,95 @@ const ProgressDashboard: React.FC = () => {
               </div>
             </div>
           </div>
+        ) : (
+          <div className="rounded-3xl border border-dashed border-gray-200 bg-white/80 p-12 text-center shadow-sm">
+            <div className="text-6xl mb-4" aria-hidden="true">📊</div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              No progress data yet
+            </h3>
+            <p className="mt-2 text-sm text-gray-600 mb-6">
+              Start studying vocabulary to see your progress here. Your stats will appear once you begin learning words.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <a
+                href="/books"
+                className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                <span className="mr-2" aria-hidden="true">📚</span>
+                Go to My Books
+              </a>
+              <a
+                href="/vocab-lists"
+                className="inline-flex items-center justify-center rounded-full border border-gray-200 px-5 py-3 text-sm font-semibold text-gray-700 transition hover:border-gray-300 hover:text-gray-900"
+              >
+                <span className="mr-2" aria-hidden="true">📝</span>
+                View Vocabulary Lists
+              </a>
+            </div>
+          </div>
         )}
 
         {/* Book Progress */}
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-6 py-4 border-b border-gray-200">
+        <div className="rounded-3xl border border-gray-100 bg-white/95 p-5 shadow-soft-card">
+          <div className="mb-4">
             <h2 className="text-xl font-semibold text-gray-900">Reading Progress</h2>
+            <p className="text-sm text-gray-600 mt-1">Track your progress through each book</p>
           </div>
-          <div className="p-6">
+          <div>
             {bookProgress.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="text-6xl mb-4">📖</div>
-                <h3 className="text-lg font-medium text-gray-700 mb-2">No reading progress yet</h3>
-                <p className="text-gray-500">
-                  Start reading a book to see your progress here
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-12 text-center">
+                <div className="text-5xl mb-4" aria-hidden="true">📖</div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  No reading progress yet
+                </h3>
+                <p className="text-sm text-gray-600 mb-6">
+                  Start reading a book to see your progress here. Your reading statistics will appear as you make progress.
                 </p>
+                <a
+                  href="/books"
+                  className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+                >
+                  <span className="mr-2" aria-hidden="true">📚</span>
+                  Start Reading
+                </a>
               </div>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 {bookProgress.map((book) => (
-                  <div key={book.book_id} className="border border-gray-200 rounded-lg p-4">
+                  <div key={book.book_id} className="rounded-2xl border border-gray-200 bg-white p-5 hover:shadow-md transition-shadow">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-lg font-semibold text-gray-900">{book.title}</h3>
-                      <span className="text-sm text-gray-600">
+                      <span className="text-sm font-semibold text-gray-600">
                         {Math.round(book.progress * 100)}% complete
                       </span>
                     </div>
-                    <div className="mb-3">
-                      <div className="bg-gray-200 rounded-full h-3">
+                    <div className="mb-4">
+                      <div className="bg-gray-200 rounded-full h-2.5">
                         <div
-                          className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                          className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
                           style={{ width: `${book.progress * 100}%` }}
                         ></div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-500">Words Read:</span>
-                        <span className="ml-2 font-medium text-gray-900">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span aria-hidden="true">📄</span>
+                        <span className="text-gray-600">Words Read:</span>
+                        <span className="font-semibold text-gray-900">
                           {book.words_read.toLocaleString()}
                         </span>
                       </div>
-                      <div>
-                        <span className="text-gray-500">Vocabulary:</span>
-                        <span className="ml-2 font-medium text-gray-900">
+                      <div className="flex items-center gap-2">
+                        <span aria-hidden="true">🔤</span>
+                        <span className="text-gray-600">Vocabulary:</span>
+                        <span className="font-semibold text-gray-900">
                           {book.vocabulary_encountered}
                         </span>
                       </div>
-                      <div>
-                        <span className="text-gray-500">Status:</span>
-                        <span className={`ml-2 font-medium ${
+                      <div className="flex items-center gap-2">
+                        <span aria-hidden="true">✓</span>
+                        <span className="text-gray-600">Status:</span>
+                        <span className={`font-semibold ${
                           book.progress === 1 ? 'text-green-600' : 'text-blue-600'
                         }`}>
                           {book.progress === 1 ? 'Completed' : 'In Progress'}

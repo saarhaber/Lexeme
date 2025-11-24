@@ -14,11 +14,8 @@ const VocabularyExplorer = lazy(() => import('./pages/VocabularyExplorer'));
 const SwipeStudySession = lazy(() => import('./pages/SwipeStudySession'));
 const ReadingMode = lazy(() => import('./pages/ReadingMode'));
 const BooksManagement = lazy(() => import('./pages/BooksManagement'));
-const Settings = lazy(() => import('./pages/Settings'));
-const Onboarding = lazy(() => import('./pages/Onboarding'));
 const ProgressDashboard = lazy(() => import('./pages/ProgressDashboard'));
 const VocabLists = lazy(() => import('./pages/VocabLists'));
-const SRSReview = lazy(() => import('./pages/SRSReview'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 const DemoExperience = lazy(() => import('./pages/DemoExperience'));
 const About = lazy(() => import('./pages/About'));
@@ -73,7 +70,6 @@ function AppRoutes() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/demo" element={<DemoExperience />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
-                <Route path="/onboarding" element={<Onboarding />} />
                 <Route path="/about" element={<About />} />
                 <Route
                   path="/books"
@@ -124,14 +120,6 @@ function AppRoutes() {
                   }
                 />
                 <Route
-                  path="/settings"
-                  element={
-                    <ProtectedRoute>
-                      <Settings />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
                   path="/progress"
                   element={
                     <ProtectedRoute>
@@ -152,14 +140,6 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute>
                       <VocabLists />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/review"
-                  element={
-                    <ProtectedRoute>
-                      <SRSReview />
                     </ProtectedRoute>
                   }
                 />

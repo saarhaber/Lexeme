@@ -1,6 +1,8 @@
 """
 Dictionary service for fetching translations and grammar information.
 Uses multiple free APIs and fallback methods.
+Primary source: Wiktextract via kaikki.org (high-quality Wiktionary data)
+Fallback: MyMemory, WordReference, LibreTranslate, etc.
 """
 import os
 import requests
@@ -9,16 +11,59 @@ import json
 import time
 import re
 
+# Try to import KaikkiService, but don't fail if it's not available
+try:
+    from .kaikki_service import KaikkiService
+    KAIKKI_AVAILABLE = True
+except ImportError:
+    KAIKKI_AVAILABLE = False
+    KaikkiService = None
+
+# Try to import WiktextractService for direct Wiktionary parsing
+try:
+    from .wiktextract_service import WiktextractService
+    WIKTEXTRACT_SERVICE_AVAILABLE = True
+except ImportError:
+    WIKTEXTRACT_SERVICE_AVAILABLE = False
+    WiktextractService = None
+
 class DictionaryService:
-    """Service for fetching word definitions, translations, and grammar information."""
+    """
+    Service for fetching word definitions, translations, and grammar information.
     
-    def __init__(self):
+    Optimized for free tier deployment:
+    - Checks database first (grows organically as books are processed)
+    - Only calls APIs for words not in database
+    - Efficient caching reduces API calls significantly
+    """
+    
+    def __init__(self, db_session=None):
+        """
+        Initialize DictionaryService.
+        
+        Args:
+            db_session: Optional database session for checking existing lemmas
+        """
         self.cache = {}
         self.rate_limit_delay = 0.05  # Reduced delay for faster processing (was 0.1)
         self.normalization_cache = {}
         self._spacy_models = {}
         self._spacy_download_attempted = set()
         self.spacy_auto_download_enabled = self._should_auto_download_spacy()
+        self._db_session = db_session  # For database lookups
+        
+        # Initialize WiktextractService (direct Wiktionary parsing) - BEST QUALITY
+        if WIKTEXTRACT_SERVICE_AVAILABLE:
+            self.wiktextract_service = WiktextractService(timeout=10, rate_limit_delay=0.5)
+        else:
+            self.wiktextract_service = None
+            print("[DictionaryService] WiktextractService not available (install: pip install wiktextract)")
+        
+        # Initialize KaikkiService (Wiktextract via kaikki.org) as fallback
+        if KAIKKI_AVAILABLE:
+            self.kaikki_service = KaikkiService(timeout=5, rate_limit_delay=0.1)
+        else:
+            self.kaikki_service = None
 
     def normalize_word_form(self, word: str, language: str) -> str:
         """
@@ -31,7 +76,7 @@ class DictionaryService:
         normalized = self._normalize_word_form(word.strip().lower(), language)
         return normalized or word.strip().lower()
     
-    def get_word_info(self, word: str, language: str, target_language: str = "en") -> Dict:
+    def get_word_info(self, word: str, language: str, target_language: str = "en", db = None) -> Dict:
         """
         Get comprehensive word information including translation and grammar breakdown.
         
@@ -51,6 +96,7 @@ class DictionaryService:
         lookup_word = normalized_word or word_lower
         cache_key = f"{lookup_word}_{language}_{target_language}"
         
+        # Check in-memory cache first
         if cache_key in self.cache:
             cached = dict(self.cache[cache_key])
             cached['word'] = word_clean or lookup_word
@@ -70,7 +116,54 @@ class DictionaryService:
             'source': 'none'
         }
         
-        # Try different dictionary sources based on language
+        # PRIMARY SOURCE: Check database first (grows organically as books are processed)
+        # This is the REAL optimization - reuse definitions from previously processed books!
+        db_to_use = db or self._db_session
+        if db_to_use:
+            try:
+                from ..models.lemma import Lemma
+                existing_lemma = db_to_use.query(Lemma).filter(
+                    Lemma.lemma == lookup_word,
+                    Lemma.language == language
+                ).first()
+                
+                if existing_lemma and existing_lemma.definition:
+                    # Found in database! Use it - no API call needed
+                    result['definition'] = existing_lemma.definition
+                    result['translation'] = existing_lemma.definition  # Use definition as translation
+                    result['part_of_speech'] = existing_lemma.pos or ''
+                    if existing_lemma.morphology:
+                        result['grammar'] = existing_lemma.morphology
+                    result['source'] = 'database'
+                    self.cache[cache_key] = dict(result)
+                    return result
+            except Exception as e:
+                # If database lookup fails, continue to API fallbacks
+                print(f"[DictionaryService] Database lookup error: {e}")
+        
+        # SECONDARY SOURCE: Try direct Wiktionary parsing with wiktextract (BEST QUALITY)
+        if self.wiktextract_service:
+            wiktextract_result = self.wiktextract_service.get_word(lookup_word, language, target_language)
+            if wiktextract_result and (wiktextract_result.get('translation') or wiktextract_result.get('definition')):
+                # Merge wiktextract data into result
+                result = self._merge_kaikki_result(result, wiktextract_result, word_clean, lookup_word, word_lower)
+                # If we got good data, use it and skip fallbacks
+                if result.get('translation') or result.get('definition'):
+                    self.cache[cache_key] = dict(result)
+                    return result
+        
+        # TERTIARY SOURCE: Try Wiktextract via kaikki.org (if local data available)
+        if self.kaikki_service:
+            kaikki_result = self.kaikki_service.get_word(lookup_word, language, target_language)
+            if kaikki_result and (kaikki_result.get('translation') or kaikki_result.get('definition')):
+                # Merge kaikki data into result
+                result = self._merge_kaikki_result(result, kaikki_result, word_clean, lookup_word, word_lower)
+                # If we got good data, use it and skip fallbacks
+                if result.get('translation') or result.get('definition'):
+                    self.cache[cache_key] = dict(result)
+                    return result
+        
+        # FALLBACK: Try different dictionary sources based on language
         if language == 'en':
             result = self._get_english_definition(lookup_word, result)
         elif language in ['it', 'es', 'fr', 'de', 'pt']:
@@ -709,6 +802,237 @@ class DictionaryService:
         
         # Default to NOUN if we can't determine
         return 'NOUN'
+    
+    def _merge_kaikki_result(self, result: Dict, kaikki_data: Dict, word_clean: str, lookup_word: str, word_lower: str) -> Dict:
+        """
+        Merge kaikki.org (wiktextract) data into the standard result format.
+        Ensures ALL relevant fields are preserved.
+        
+        Args:
+            result: Current result dictionary
+            kaikki_data: Data from kaikki_service or wiktextract_service
+            word_clean: Original word (cleaned)
+            lookup_word: Normalized lookup word
+            word_lower: Lowercase word
+        
+        Returns:
+            Merged result dictionary
+        """
+        # Preserve word information
+        result['word'] = word_clean or lookup_word
+        result['normalized_word'] = lookup_word
+        result['normalization_applied'] = lookup_word != word_lower
+        
+        # Merge translations and definitions (kaikki/wiktextract has better quality)
+        if kaikki_data.get('translation'):
+            result['translation'] = kaikki_data['translation']
+        if kaikki_data.get('definition'):
+            result['definition'] = kaikki_data['definition']
+        
+        # Merge part of speech
+        if kaikki_data.get('part_of_speech'):
+            result['part_of_speech'] = kaikki_data['part_of_speech']
+        
+        # Merge examples (kaikki/wiktextract has contextual examples)
+        if kaikki_data.get('examples'):
+            existing_examples = result.get('examples', [])
+            for ex in kaikki_data['examples']:
+                if ex not in existing_examples:
+                    existing_examples.append(ex)
+            result['examples'] = existing_examples
+        
+        # Merge grammar information - preserve ALL grammar fields
+        if kaikki_data.get('grammar'):
+            # Merge with existing grammar, kaikki/wiktextract takes precedence
+            existing_grammar = result.get('grammar', {})
+            # Deep merge: update existing, add new fields
+            for key, value in kaikki_data['grammar'].items():
+                if key == 'forms' and isinstance(value, list) and 'forms' in existing_grammar:
+                    # Merge forms lists, avoiding duplicates
+                    existing_forms = existing_grammar.get('forms', [])
+                    for form in value:
+                        if form not in existing_forms:
+                            existing_forms.append(form)
+                    existing_grammar['forms'] = existing_forms[:10]  # Limit to 10
+                else:
+                    existing_grammar[key] = value
+            result['grammar'] = existing_grammar
+        
+        # Add pronunciations if available
+        if kaikki_data.get('pronunciations'):
+            existing_prons = result.get('pronunciations', [])
+            for pron in kaikki_data['pronunciations']:
+                if pron not in existing_prons:
+                    existing_prons.append(pron)
+            result['pronunciations'] = existing_prons
+        
+        # Add etymology if available
+        if kaikki_data.get('etymology'):
+            result['etymology'] = kaikki_data['etymology']
+        
+        # Add related terms if available
+        if kaikki_data.get('related_terms'):
+            existing_related = result.get('related_terms', [])
+            for term in kaikki_data['related_terms']:
+                if term not in existing_related:
+                    existing_related.append(term)
+            result['related_terms'] = existing_related[:5]  # Limit to 5
+        
+        # Preserve original source from kaikki_data (could be 'curated', 'kaikki', 'wiktextract', etc.)
+        if kaikki_data.get('source'):
+            result['source'] = kaikki_data['source']
+        else:
+            result['source'] = 'wiktextract' if 'wiktextract' in str(type(kaikki_data)) else 'kaikki'
+        
+        return result
+    
+    def get_word_entry(self, word: str, language: str, target_language: str = "en", context: Optional[str] = None, db = None) -> Dict:
+        """
+        Get word information in DemoWordEntry format (matching frontend structure).
+        
+        Args:
+            word: The word to look up
+            language: Source language code
+            target_language: Target language for translation
+            context: Optional sentence context
+            db: Optional database session
+        
+        Returns:
+            Dictionary matching DemoWordEntry structure:
+            {
+                'word': str,
+                'translation': str,
+                'definition': str,
+                'pos': str,
+                'context': Optional[str],
+                'cefr': Optional[str],
+                'frequency': Optional[str],
+                'notes': Optional[str],
+                'forms': Optional[List[str]],
+                'synonyms': Optional[List[str]],
+                'tip': Optional[str]
+            }
+        """
+        # Get standard word info
+        word_info = self.get_word_info(word, language, target_language, db)
+        
+        # Map to DemoWordEntry format
+        entry = {
+            'word': word_info.get('word', word),
+            'translation': word_info.get('translation', ''),
+            'definition': word_info.get('definition', ''),
+            'pos': word_info.get('part_of_speech', '').lower() or word_info.get('pos', ''),
+            'context': context,
+            'cefr': self._estimate_cefr(word_info, language),
+            'frequency': self._estimate_frequency(word_info),
+            'notes': None,
+            'forms': self._extract_forms(word_info),
+            'synonyms': self._extract_synonyms(word_info),
+            'tip': self._generate_tip(word_info, language)
+        }
+        
+        return entry
+    
+    def _estimate_cefr(self, word_info: Dict, language: str) -> Optional[str]:
+        """Estimate CEFR level based on word characteristics."""
+        # Simple heuristic - can be enhanced with actual CEFR data
+        difficulty = word_info.get('difficulty_level', 0.0)
+        if difficulty < 0.3:
+            return 'A1'
+        elif difficulty < 0.5:
+            return 'A2'
+        elif difficulty < 0.7:
+            return 'B1'
+        elif difficulty < 0.85:
+            return 'B2'
+        elif difficulty < 0.95:
+            return 'C1'
+        else:
+            return 'C2'
+    
+    def _estimate_frequency(self, word_info: Dict) -> Optional[str]:
+        """Estimate frequency level."""
+        global_freq = word_info.get('global_frequency', 0.0)
+        if global_freq > 0.01:
+            return 'Very common'
+        elif global_freq > 0.005:
+            return 'Common'
+        elif global_freq > 0.001:
+            return 'Moderate'
+        elif global_freq > 0.0001:
+            return 'Less common'
+        else:
+            return 'Rare'
+    
+    def _extract_forms(self, word_info: Dict) -> Optional[List[str]]:
+        """Extract word forms from grammar/morphology data."""
+        forms = []
+        grammar = word_info.get('grammar', {})
+        
+        # Extract from grammar.forms (from wiktextract)
+        if 'forms' in grammar:
+            forms_list = grammar['forms']
+            if isinstance(forms_list, list):
+                # Extract form words - handle both dict and string formats
+                for f in forms_list:
+                    if isinstance(f, dict):
+                        form_word = f.get('form', '') or f.get('word', '')
+                        if form_word:
+                            forms.append(str(form_word))
+                    elif isinstance(f, str):
+                        forms.append(f)
+                forms = forms[:10]  # Limit to 10 most common forms
+        
+        # Also check morphology if it's a different structure
+        if not forms and isinstance(word_info.get('morphology'), dict):
+            morphology = word_info.get('morphology', {})
+            if 'forms' in morphology:
+                morph_forms = morphology['forms']
+                if isinstance(morph_forms, list):
+                    for f in morph_forms[:10]:
+                        if isinstance(f, dict):
+                            form_word = f.get('form', '') or f.get('word', '')
+                            if form_word:
+                                forms.append(str(form_word))
+                        elif isinstance(f, str):
+                            forms.append(f)
+        
+        return forms if forms else None
+    
+    def _extract_synonyms(self, word_info: Dict) -> Optional[List[str]]:
+        """Extract synonyms and related terms if available."""
+        # Extract related terms from wiktextract data
+        related_terms = word_info.get('related_terms', [])
+        if related_terms and isinstance(related_terms, list):
+            # Return related terms as synonyms (similar concept)
+            return [str(term) for term in related_terms[:5]]
+        
+        # Could be enhanced to extract actual synonyms from dictionary data
+        return None
+    
+    def _generate_tip(self, word_info: Dict, language: str) -> Optional[str]:
+        """Generate a helpful tip about the word."""
+        grammar = word_info.get('grammar', {})
+        pos = word_info.get('part_of_speech', '').lower()
+        
+        tips = []
+        
+        if language == 'it':
+            if pos == 'verb':
+                conjugation = grammar.get('conjugation', '')
+                if conjugation:
+                    tips.append(f"Verb conjugation: {conjugation}")
+            elif pos in ['noun', 'adj']:
+                gender = grammar.get('gender', '')
+                if gender:
+                    tips.append(f"Gender: {gender}")
+        
+        # Add etymology tip if available
+        etymology = word_info.get('etymology', '')
+        if etymology and len(etymology) < 100:
+            tips.append(f"Etymology: {etymology[:80]}...")
+        
+        return '; '.join(tips) if tips else None
     
     def batch_get_word_info(self, words: List[str], language: str, target_language: str = "en") -> Dict[str, Dict]:
         """Get information for multiple words efficiently."""

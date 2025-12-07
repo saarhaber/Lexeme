@@ -1,5 +1,6 @@
 import os
 import random
+import re
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Depends, status, BackgroundTasks
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from ..models.book import Book
 from ..models.user import User, UserVocabStatus
 from ..services.dictionary_service import DictionaryService
 from ..utils.security import decode_access_token, oauth2_scheme
+from wordfreq import zipf_frequency
 
 router = APIRouter()
 dictionary_service = DictionaryService()
@@ -119,6 +121,53 @@ def _lemma_needs_enrichment(lemma: Lemma) -> bool:
     return False
 
 
+_INVALID_DEFINITION_PREFIXES = (
+    "plural:",
+    "feminine:",
+    "masculine:",
+    "root:",
+    "prefix:",
+    "suffix:",
+)
+
+
+def _has_valid_definition(definition: Optional[str], lemma_text: str) -> bool:
+    """Return True if the definition looks like a real translation/definition."""
+    if not definition:
+        return False
+    cleaned = (definition or "").strip()
+    if not cleaned:
+        return False
+    lower_clean = cleaned.lower()
+    if lower_clean == (lemma_text or "").lower():
+        return False
+    if any(lower_clean.startswith(prefix) for prefix in _INVALID_DEFINITION_PREFIXES):
+        return False
+    # Reject entries without alphabetic content
+    if not re.search(r"[A-Za-z]", cleaned):
+        return False
+    # Reject extremely short alpha content (e.g., "-")
+    alpha_only = re.sub(r'[^A-Za-z]', '', cleaned)
+    if len(alpha_only) < 2:
+        return False
+
+    words = cleaned.split()
+    # Very long phrases for tiny lemmas are usually noise
+    if len(words) > 4 and len(lemma_text or "") <= 4:
+        return False
+    # Proper-noun translation for lowercase lemmas is suspicious (e.g., "Berlin" for "umani")
+    if (lemma_text and lemma_text[0].islower() and cleaned and cleaned[0].isupper() and len(words) == 1 and len(lemma_text) >= 3):
+        return False
+    # Use word frequency to catch unlikely typos in short lemmas
+    try:
+        freq = zipf_frequency(words[0].lower(), "en", wordlist="best")
+        if freq < 1.0 and len(lemma_text or "") <= 4 and len(words) == 1:
+            return False
+    except Exception:
+        pass
+    return True
+
+
 def _enrich_lemma_if_needed(lemma: Lemma, db: Optional[Session] = None) -> Tuple[str, dict, str, bool]:
     """
     Ensure lemma has translation/grammar data. Returns tuple of
@@ -168,10 +217,14 @@ def _enrich_lemma_if_needed(lemma: Lemma, db: Optional[Session] = None) -> Tuple
     
     if needs_definition:
         translation = (dict_info.get('translation') or dict_info.get('definition') or "").strip()
-        if translation and translation.lower() != lemma.lemma.lower():
+        if translation and translation.lower() != lemma.lemma.lower() and _has_valid_definition(translation, lemma.lemma):
             definition = translation
             lemma.definition = translation
             updated = True
+        else:
+            # Drop unusable definitions (e.g., plural markers)
+            definition = ""
+            lemma.definition = None
 
     if needs_morphology:
         grammar = dict_info.get('grammar') or {}
@@ -256,6 +309,61 @@ def _build_frequency_map(
     return {lemma_id: frequency for lemma_id, frequency in freq_results}
 
 
+@router.get("/book/{book_id}/stats")
+async def get_book_vocabulary_stats(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user_real),
+):
+    """
+    Lightweight vocabulary stats endpoint.
+    Returns only counts (learned/unknown/ignored) for the current user to
+    avoid transferring full vocabulary payloads when the UI only needs
+    summary information.
+    """
+    user_id = current_user["user_id"]
+
+    lemma_ids = [
+        row[0]
+        for row in db.query(Token.lemma_id)
+        .filter(Token.book_id == book_id)
+        .distinct()
+        .all()
+    ]
+    total = len(lemma_ids)
+    if total == 0:
+        return {
+            "book_id": book_id,
+            "total": 0,
+            "learned": 0,
+            "unknown": 0,
+            "ignored": 0,
+        }
+
+    statuses = db.query(
+        UserVocabStatus.lemma_id,
+        UserVocabStatus.status,
+    ).filter(
+        UserVocabStatus.user_id == user_id,
+        UserVocabStatus.lemma_id.in_(lemma_ids),
+    ).all()
+    status_map = {
+        lemma_id: _normalize_status_value(status) for lemma_id, status in statuses
+    }
+
+    learned = sum(1 for status in status_map.values() if status == "learned")
+    ignored = sum(1 for status in status_map.values() if status == "ignored")
+    unknown = max(total - learned - ignored, 0)
+
+    return {
+        "book_id": book_id,
+        "total": total,
+        "learned": learned,
+        "unknown": unknown,
+        "ignored": ignored,
+    }
+
+
 class LemmaResponse(BaseModel):
     id: int
     lemma: str
@@ -313,7 +421,8 @@ def _build_vocabulary_items(
     enrich_lemmas: bool,
     db: Session,
     max_sync_enrichments: int = 0,
-    max_background_queue: int = 0
+    max_background_queue: int = 0,
+    include_word_entry: bool = True
 ):
     vocabulary: List[VocabularyItem] = []
     lemmas_updated = False
@@ -338,42 +447,47 @@ def _build_vocabulary_items(
 
         normalized_status = _normalize_status_value(user_status_value)
         frequency_in_book = frequency_map.get(lemma.id, 0)
+        global_freq = int(lemma.global_frequency or 0)
+        if frequency_in_book >= 20 and global_freq > frequency_in_book:
+            # Tokens were previously capped; fall back to the full count we stored
+            frequency_in_book = global_freq
         
         # Get rich word entry data matching frontend DemoWordEntry structure
+        example_context = None
         word_entry = None
-        try:
-            # Get example sentence for context
-            example_context = None
-            if lemma.id in frequency_map:
-                # Try to get a token with sentence context
-                token_with_context = db.query(Token).filter(
-                    Token.lemma_id == lemma.id
-                ).filter(
-                    Token.sentence_context.isnot(None)
-                ).first()
-                if token_with_context and token_with_context.sentence_context:
-                    example_context = token_with_context.sentence_context
-            
-            # Get word entry in DemoWordEntry format
-            word_entry_data = dictionary_service.get_word_entry(
-                lemma.lemma,
-                lemma.language,
-                "en",
-                context=example_context,
-                db=db
-            )
-            word_entry = WordEntry(**word_entry_data)
-        except Exception as e:
-            print(f"[Vocab] Error creating word entry for {lemma.lemma}: {e}")
-            # Create minimal word entry if lookup fails
-            word_entry = WordEntry(
-                word=lemma.lemma,
-                translation=definition or "",
-                definition=definition or "",
-                pos=pos or lemma.pos or "",
-                context=example_context,
-                frequency=_format_frequency(lemma.global_frequency) if lemma.global_frequency else None
-            )
+        if include_word_entry:
+            try:
+                # Get example sentence for context
+                if lemma.id in frequency_map:
+                    # Try to get a token with sentence context
+                    token_with_context = db.query(Token).filter(
+                        Token.lemma_id == lemma.id
+                    ).filter(
+                        Token.sentence_context.isnot(None)
+                    ).first()
+                    if token_with_context and token_with_context.sentence_context:
+                        example_context = token_with_context.sentence_context
+                
+                # Get word entry in DemoWordEntry format
+                word_entry_data = dictionary_service.get_word_entry(
+                    lemma.lemma,
+                    lemma.language,
+                    "en",
+                    context=example_context,
+                    db=db
+                )
+                word_entry = WordEntry(**word_entry_data)
+            except Exception as e:
+                print(f"[Vocab] Error creating word entry for {lemma.lemma}: {e}")
+                # Create minimal word entry if lookup fails
+                word_entry = WordEntry(
+                    word=lemma.lemma,
+                    translation=definition or "",
+                    definition=definition or "",
+                    pos=pos or lemma.pos or "",
+                    context=example_context,
+                    frequency=_format_frequency(lemma.global_frequency) if lemma.global_frequency else None
+                )
         
         vocabulary_item = VocabularyItem(
             lemma=LemmaResponse(
@@ -406,6 +520,7 @@ async def get_book_vocabulary(
     sort_by: str = Query("frequency", regex="^(frequency|alphabetical|chronological|random)$"),
     filter_status: Optional[str] = Query(None, regex="^(learned|known|learning|unknown|ignored)$"),
     chapter: Optional[int] = Query(None, ge=0),
+    include_word_entry: bool = Query(True, description="Include rich word_entry data; set false for faster responses"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user_real)
 ):
@@ -474,7 +589,8 @@ async def get_book_vocabulary(
         True,
         db,
         max_sync_enrichments=MAX_SYNC_ENRICHMENTS,
-        max_background_queue=MAX_BACKGROUND_ENRICHMENTS
+        max_background_queue=MAX_BACKGROUND_ENRICHMENTS,
+        include_word_entry=include_word_entry
     )
     
     if pending_background:
@@ -518,8 +634,11 @@ async def get_swipe_session_vocabulary(
     
     # Ultra-fast path: Get lemma IDs directly from tokens (no joins needed)
     # This is the fastest possible query
-    token_lemma_ids = db.query(Token.lemma_id).filter(
-        Token.book_id == book_id
+    token_lemma_ids = db.query(Token.lemma_id).join(Lemma, Lemma.id == Token.lemma_id).filter(
+        Token.book_id == book_id,
+        Lemma.definition.isnot(None),
+        func.length(func.trim(Lemma.definition)) > 0,
+        func.lower(func.trim(Lemma.definition)) != func.lower(func.trim(Lemma.lemma))
     ).distinct().all()
     
     if not token_lemma_ids:
@@ -575,6 +694,29 @@ async def get_swipe_session_vocabulary(
     
     # Fetch lemmas directly by ID (indexed lookup - very fast)
     lemmas = db.query(Lemma).filter(Lemma.id.in_(sampled_ids)).all()
+
+    # Try to enrich lemmas that slipped through without a usable translation
+    lemmas_needing_enrichment = [
+        lemma for lemma in lemmas if not _has_valid_definition(lemma.definition, lemma.lemma)
+    ]
+    updated_any = False
+    for lemma in lemmas_needing_enrichment[:MAX_SYNC_ENRICHMENTS]:
+        definition, morphology, pos, changed = _enrich_lemma_if_needed(lemma, db)
+        if definition:
+            lemma.definition = definition
+        if morphology:
+            merged = _format_morphology(lemma.morphology)
+            merged.update(morphology)
+            lemma.morphology = merged
+        if pos:
+            lemma.pos = pos
+        updated_any = updated_any or changed
+    if updated_any:
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            print(f"[Vocab] Failed to persist swipe enrichment: {exc}")
     
     # Build frequency map in one query
     frequency_results = db.query(
@@ -589,9 +731,17 @@ async def get_swipe_session_vocabulary(
     # Build vocabulary items WITHOUT enrichment (ultra-fast)
     vocabulary: List[VocabularyItem] = []
     for lemma in lemmas:
+        # Skip lemmas that still don't have a usable translation/definition
+        if not _has_valid_definition(lemma.definition, lemma.lemma):
+            continue
+
         user_status = status_map.get(lemma.id)
         normalized_status = _normalize_status_value(user_status)
         frequency_in_book = frequency_map.get(lemma.id, 0)
+        global_freq = int(lemma.global_frequency or 0)
+        if frequency_in_book >= 20 and global_freq > frequency_in_book:
+            # Tokens were previously capped; fall back to the full count we stored
+            frequency_in_book = global_freq
         
         # Create minimal word_entry from cached data (no API calls)
         word_entry = None

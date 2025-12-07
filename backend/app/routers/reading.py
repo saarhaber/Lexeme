@@ -85,22 +85,21 @@ async def get_reading_text(
     position: Optional[int] = None,
     length: int = 2000,  # Characters to return
     db: Session = Depends(get_db),
-    current_user: dict = Depends(lambda: {"user_id": 1})  # Simplified for preview
+    current_user: dict = Depends(get_current_user_real)
 ):
     """Get book text for reading mode, starting from user's last position."""
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
     
-    # Get reading progress (optional - for preview we don't need strict auth)
-    progress = None
-    try:
-        progress = db.query(ReadingProgress).filter(
-            ReadingProgress.user_id == current_user.get("user_id", 1),
-            ReadingProgress.book_id == book_id
-        ).first()
-    except:
-        pass
+    if book.user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Get reading progress for the authenticated user
+    progress = db.query(ReadingProgress).filter(
+        ReadingProgress.user_id == current_user["user_id"],
+        ReadingProgress.book_id == book_id
+    ).first()
     
     # Determine start position
     if position is not None:

@@ -10,6 +10,8 @@ from typing import Dict, List, Optional
 import json
 import time
 import re
+import unicodedata
+from wordfreq import zipf_frequency
 
 # Try to import KaikkiService, but don't fail if it's not available
 try:
@@ -129,8 +131,9 @@ class DictionaryService:
                 
                 if existing_lemma and existing_lemma.definition:
                     # Found in database! Use it - no API call needed
-                    result['definition'] = existing_lemma.definition
-                    result['translation'] = existing_lemma.definition  # Use definition as translation
+                    sanitized = self._sanitize_translation(existing_lemma.definition, lookup_word, language, allow_blank=True)
+                    result['definition'] = sanitized or existing_lemma.definition
+                    result['translation'] = sanitized or existing_lemma.definition  # Use sanitized translation when possible
                     result['part_of_speech'] = existing_lemma.pos or ''
                     if existing_lemma.morphology:
                         result['grammar'] = existing_lemma.morphology
@@ -171,6 +174,13 @@ class DictionaryService:
         else:
             # Generic fallback
             result = self._get_generic_translation(lookup_word, language, target_language, result)
+
+        # Final cleanup to ensure we don't return noisy punctuation/quotes
+        result['translation'] = self._sanitize_translation(result.get('translation', ''), lookup_word, language)
+        # If translation is missing, try to reuse the sanitized definition
+        if not result['translation']:
+            result['translation'] = self._sanitize_translation(result.get('definition', ''), lookup_word, language)
+        result['definition'] = self._sanitize_translation(result.get('definition', ''), lookup_word, language, allow_blank=True)
         
         self.cache[cache_key] = dict(result)
         return result
@@ -187,10 +197,14 @@ class DictionaryService:
             return self.normalization_cache[cache_key]
         
         normalized = word
+        # Strip accents early to improve matches when spaCy isn't available
+        stripped_word = self._strip_accents(word)
+        if stripped_word and stripped_word != word:
+            normalized = stripped_word
         nlp = self._get_spacy_model(language)
         if nlp:
             try:
-                doc = nlp(word)
+                doc = nlp(normalized)
                 if len(doc) > 0:
                     lemma = doc[0].lemma_.strip()
                     if lemma and lemma != '-PRON-':
@@ -280,13 +294,57 @@ class DictionaryService:
             return current_normalized
         
         lower_word = word.lower().replace("’", "").replace("'", "")
+        lower_word_stripped = self._strip_accents(lower_word)
         candidate = current_normalized
         
         clitic_candidate = self._strip_italian_clitic(lower_word)
         if clitic_candidate and clitic_candidate != candidate:
             candidate = clitic_candidate
         
+        # Heuristic: map common conjugated endings back to infinitives when spaCy is unavailable
+        heuristic_candidate = self._italian_infinitive_hint(lower_word_stripped or lower_word)
+        if heuristic_candidate and self._looks_like_infinitive(heuristic_candidate):
+            candidate = heuristic_candidate
+
+        # If it's not a verb infinitive, try to normalize plural nouns/adjectives
+        noun_candidate = self._normalize_italian_noun_adjective(lower_word_stripped or lower_word, candidate)
+        if noun_candidate and noun_candidate != candidate:
+            candidate = noun_candidate
+        
         return candidate
+
+    def _normalize_italian_noun_adjective(self, original_word: str, current: str) -> Optional[str]:
+        """
+        Normalize common Italian plural noun/adjective endings to singular to improve lookups.
+        """
+        word = (original_word or "").strip()
+        if not word or self._looks_like_infinitive(current):
+            return current
+
+        # Skip if the current form already looks like a singular noun/adjective
+        if current and current.endswith(('o', 'a', 'e')):
+            return current
+
+        candidate = current
+        # Masculine plural -> singular (ragazzi -> ragazzo, umani -> umano)
+        if word.endswith('i') and len(word) > 3:
+            candidate = f"{word[:-1]}o"
+        # Feminine plural -> singular (case) -> casa/cose)
+        elif word.endswith('e') and len(word) > 3:
+            candidate = f"{word[:-1]}a"
+
+        if candidate and len(candidate) >= 3:
+            return candidate
+        return current
+    
+    def _strip_accents(self, text: str) -> str:
+        """Remove accents/diacritics (e.g., guarderò -> guardero) for fallback normalization."""
+        if not text:
+            return text
+        return ''.join(
+            ch for ch in unicodedata.normalize('NFD', text)
+            if unicodedata.category(ch) != 'Mn'
+        )
     
     def _strip_italian_clitic(self, word: str) -> Optional[str]:
         """Remove Italian clitic pronouns from the end of a word to recover the infinitive."""
@@ -341,6 +399,44 @@ class DictionaryService:
         
         return None
     
+    def _italian_infinitive_hint(self, word: str) -> Optional[str]:
+        """
+        Lightweight heuristic to map common conjugated forms to infinitives when spaCy is unavailable.
+        Examples: riflettono -> riflettere, liberava -> liberare, guarderò -> guardare.
+        """
+        if not word:
+            return None
+        
+        suffix_map = {
+            'avano': ['are'],
+            'evano': ['ere'],
+            'ivano': ['ire'],
+            'iamo': ['are', 'ere', 'ire'],
+            'ate': ['are'],
+            'ete': ['ere'],
+            'ite': ['ire'],
+            'ava': ['are'],
+            'eva': ['ere'],
+            'iva': ['ire'],
+            'ano': ['are'],
+            'ono': ['ere', 'ire'],
+            'ero': ['are', 'ere'],
+            'aro': ['are'],
+            'iro': ['ire'],
+            'ato': ['are'],
+            'uto': ['ere'],
+            'ito': ['ire']
+        }
+        
+        for suffix, replacements in suffix_map.items():
+            if word.endswith(suffix) and len(word) > len(suffix) + 1:
+                stem = word[:-len(suffix)]
+                for rep in replacements:
+                    candidate = f"{stem}{rep}"
+                    if self._looks_like_infinitive(candidate):
+                        return candidate
+        return None
+    
     def _looks_like_infinitive(self, word: str) -> bool:
         """Check if a word looks like an Italian infinitive."""
         if not word:
@@ -348,12 +444,140 @@ class DictionaryService:
         return word.endswith(('are', 'ere', 'ire'))
     
     def _clean_translation_text(self, text: str) -> str:
-        """Standardize translation strings (remove stray punctuation, collapse whitespace)."""
+        """Standardize translation/definition strings and remove noisy formatting."""
         if not text:
             return ''
+
+        # Collapse whitespace
         cleaned = re.sub(r'\s+', ' ', text).strip()
+
+        # Drop common wrappers/punctuation
         cleaned = cleaned.strip('[]')
+        cleaned = cleaned.strip('“”"\'`')
         cleaned = cleaned.rstrip('?!.,;:').strip()
+
+        # Drop MyMemory sense markers like "-3" appended to translations
+        cleaned = re.sub(r'-\d+$', '', cleaned)
+        # Remove trailing numeric qualifiers in parentheses
+        cleaned = re.sub(r'\s*\(\d+\)$', '', cleaned)
+
+        # Normalize shouting responses (e.g., ROUTES -> routes) but keep acronyms
+        if cleaned and cleaned.isupper() and ' ' not in cleaned and len(cleaned) > 2:
+            cleaned = cleaned.lower()
+
+        return cleaned
+
+    def _translate_via_libretranslate(
+        self,
+        word: str,
+        source_lang: str,
+        target_lang: str,
+        endpoints: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        Translate using LibreTranslate (multiple public instances). Returns a cleaned string or None.
+        """
+        if not word or source_lang == target_lang:
+            return None
+
+        urls = endpoints or [
+            'https://libretranslate.com/translate',
+            'https://translate.argosopentech.com/translate',
+        ]
+
+        for url in urls:
+            try:
+                time.sleep(self.rate_limit_delay)
+                response = requests.post(
+                    url,
+                    json={
+                        'q': word,
+                        'source': source_lang,
+                        'target': target_lang,
+                        'format': 'text'
+                    },
+                    timeout=5,
+                    headers={'Content-Type': 'application/json'}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    translation = data.get('translatedText') or data.get('translation')
+                    translation = self._clean_translation_text(translation)
+                    if translation and translation.lower() != word.lower():
+                        return translation
+            except Exception:
+                continue
+        return None
+
+    def _looks_like_bad_translation(self, translation: str, source: str, language: str) -> bool:
+        """Heuristic check to flag noisy or clearly wrong translations."""
+        if not translation:
+            return True
+        cleaned = translation.strip()
+        if cleaned in {'-', '--'}:
+            return True
+        if not any(ch.isalpha() for ch in cleaned):
+            return True
+        # Too short to be meaningful
+        alpha_only = ''.join(ch for ch in cleaned if ch.isalpha())
+        if len(alpha_only) < 2:
+            return True
+        words = cleaned.split()
+        # Extremely long translations are likely off for single words
+        if len(words) > 5 and len(source) <= 5:
+            return True
+        if any(char.isdigit() for char in cleaned):
+            return True
+        # Proper-noun translation for lowercase source is often noise (e.g., "Berlin" for "umani")
+        if (source and source[0].islower() and cleaned and cleaned[0].isupper() and len(words) == 1 and len(source) >= 3):
+            return True
+        # Use frequency to catch typos (very rare English words for short sources)
+        try:
+            freq = zipf_frequency(words[0].lower(), 'en', wordlist='best')
+            if freq < 1.0 and len(source) <= 4:
+                return True
+            if freq < 0.5 and len(words) == 1:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _sanitize_translation(self, translation: str, source: str, language: str, allow_blank: bool = False) -> str:
+        """
+        Clean and validate translation text. Falls back to curated overrides when data looks noisy.
+        """
+        cleaned = self._clean_translation_text(translation or '')
+
+        # Split on common separators and keep the first usable segment
+        for sep in [';', ',', '/', '\n']:
+            if sep in cleaned:
+                parts = [p.strip() for p in cleaned.split(sep) if p.strip()]
+                if parts:
+                    cleaned = parts[0]
+                    break
+
+        # If the translation is a phrase and the source is very short, prefer the first token
+        words = cleaned.split()
+        if len(words) > 2 and len(source or '') <= 4:
+            cleaned = words[0]
+        elif len(words) > 1 and len(source or '') <= 3:
+            cleaned = words[0]
+
+        lower_clean = cleaned.lower()
+        if any(lower_clean.startswith(prefix) for prefix in ('plural:', 'feminine:', 'masculine:', 'root:', 'prefix:', 'suffix:')):
+            cleaned = ''
+        # Avoid echoing the source word back as the translation
+        if source and cleaned and cleaned.lower() == source.lower():
+            cleaned = ''
+
+        if self._looks_like_bad_translation(cleaned, source, language):
+            cleaned = ''
+
+        # Final basic cleanup
+        cleaned = self._clean_translation_text(cleaned)
+
+        if not cleaned and not allow_blank:
+            return ''
         return cleaned
     
     def _has_new_translation(self, result: Dict, previous: str) -> bool:
@@ -367,13 +591,13 @@ class DictionaryService:
         if not word:
             return False
         
-        previous_translation = result.get('translation', '')
-        if source_lang == 'it' and target_lang == 'en':
-            result = self._get_italian_english_dict(word, result)
-            if self._has_new_translation(result, previous_translation):
-                return True
-            previous_translation = result.get('translation', '')
-        
+        translation = self._translate_via_libretranslate(word, source_lang, target_lang)
+        if translation:
+            result['translation'] = translation
+            result['definition'] = translation
+            result['source'] = 'libretranslate'
+            return True
+
         translation = self._query_mymemory(word, source_lang, target_lang)
         if translation:
             result['translation'] = translation
@@ -641,25 +865,34 @@ class DictionaryService:
             result['definition'] = word
             result['translation'] = word
         else:
-            # Try MyMemory for any language pair
-            try:
-                time.sleep(self.rate_limit_delay)
-                response = requests.get(
-                    "https://api.mymemory.translated.net/get",
-                    params={'q': word, 'langpair': f"{source_lang}|{target_lang}"},
-                    timeout=5
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'responseData' in data and 'translatedText' in data['responseData']:
-                        translation = self._clean_translation_text(data['responseData']['translatedText'])
-                        if translation:
-                            result['translation'] = translation
-                            result['definition'] = translation
-                            result['source'] = 'mymemory'
-            except Exception as e:
-                print(f"Translation error for {word}: {e}")
+            translation = self._translate_via_libretranslate(word, source_lang, target_lang)
+            if translation:
+                result['translation'] = translation
+                result['definition'] = translation
+                result['source'] = 'libretranslate'
+            else:
+                # Try MyMemory only if LibreTranslate failed
+                try:
+                    time.sleep(self.rate_limit_delay)
+                    response = requests.get(
+                        "https://api.mymemory.translated.net/get",
+                        params={'q': word, 'langpair': f"{source_lang}|{target_lang}"},
+                        timeout=5
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if 'responseData' in data and 'translatedText' in data['responseData']:
+                            translation = self._clean_translation_text(data['responseData']['translatedText'])
+                            if translation:
+                                result['translation'] = translation
+                                result['definition'] = translation
+                                result['source'] = 'mymemory'
+                except Exception as e:
+                    print(f"Translation error for {word}: {e}")
+
+            if not result.get('translation'):
+                result = self._get_fallback_translation(word, source_lang, target_lang, result)
         
         return result
     
@@ -691,74 +924,27 @@ class DictionaryService:
                         return result
         except Exception as e:
             print(f"WordReference lookup error for {word}: {e}")
-        
-        # Try a comprehensive Italian-English dictionary database (common words)
-        italian_dict = {
-            'casa': 'house', 'libro': 'book', 'mare': 'sea', 'sole': 'sun', 'luna': 'moon',
-            'acqua': 'water', 'terra': 'earth', 'uomo': 'man', 'donna': 'woman', 'bambino': 'child',
-            'mangiare': 'to eat', 'bere': 'to drink', 'dormire': 'to sleep', 'camminare': 'to walk',
-            'parlare': 'to speak', 'vedere': 'to see', 'sentire': 'to hear', 'pensare': 'to think',
-            'amare': 'to love', 'volere': 'to want', 'dovere': 'must', 'potere': 'can',
-            'andare': 'to go', 'venire': 'to come', 'fare': 'to do', 'dire': 'to say',
-            'essere': 'to be', 'avere': 'to have', 'stare': 'to stay', 'sapere': 'to know',
-            'bello': 'beautiful', 'buono': 'good', 'cattivo': 'bad', 'grande': 'big',
-            'piccolo': 'small', 'nuovo': 'new', 'vecchio': 'old', 'giovane': 'young',
-            'rosso': 'red', 'verde': 'green', 'blu': 'blue', 'bianco': 'white', 'nero': 'black',
-            'giorno': 'day', 'notte': 'night', 'mattina': 'morning', 'sera': 'evening',
-            'tempo': 'time', 'anno': 'year', 'mese': 'month', 'settimana': 'week',
-            'oggi': 'today', 'domani': 'tomorrow', 'ieri': 'yesterday',
-            'qui': 'here', 'là': 'there', 'dove': 'where', 'quando': 'when',
-            'chi': 'who', 'cosa': 'what', 'perché': 'why', 'come': 'how'
-        }
-        
-        if word_lower in italian_dict:
-            result['translation'] = italian_dict[word_lower]
-            result['definition'] = italian_dict[word_lower]
-            result['source'] = 'builtin_dict'
-            return result
-        
+        # Skip curated built-in dictionary entries; rely on translation sources only
         return result
     
     def _get_fallback_translation(self, word: str, source_lang: str, target_lang: str, result: Dict) -> Dict:
         """Fallback translation using LibreTranslate API (free, open-source)."""
-        # Try LibreTranslate API (free, no API key required)
-        try:
-            time.sleep(self.rate_limit_delay)
-            if source_lang != target_lang:
-                # Try multiple LibreTranslate instances
-                libre_translate_urls = [
-                    'https://libretranslate.com/translate',
-                    'https://translate.argosopentech.com/translate'
+        if source_lang != target_lang:
+            translation = self._translate_via_libretranslate(
+                word,
+                source_lang,
+                target_lang,
+                endpoints=[
+                    'https://libretranslate.de/translate',
+                    'https://translate.mentality.rip/translate',
                 ]
-                
-                for url in libre_translate_urls:
-                    try:
-                        response = requests.post(
-                            url,
-                            json={
-                                'q': word,
-                                'source': source_lang,
-                                'target': target_lang,
-                                'format': 'text'
-                            },
-                            timeout=5,
-                            headers={'Content-Type': 'application/json'}
-                        )
-                        
-                        if response.status_code == 200:
-                            data = response.json()
-                            if 'translatedText' in data:
-                                translation = self._clean_translation_text(data['translatedText'])
-                                if translation and translation.lower() != word.lower():
-                                    result['translation'] = translation
-                                    result['definition'] = translation
-                                    result['source'] = 'libretranslate'
-                                    return result
-                    except Exception:
-                        continue  # Try next URL
-        except Exception as e:
-            print(f"LibreTranslate fallback error for {word}: {e}")
-        
+            )
+            if translation:
+                result['translation'] = translation
+                result['definition'] = translation
+                result['source'] = 'libretranslate'
+                return result
+
         return result
     
     def _infer_pos_from_word(self, word: str, language: str) -> str:

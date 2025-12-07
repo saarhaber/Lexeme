@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { apiGet } from "../utils/api";
+import { requestCache } from "../utils/requestCache";
 import ProgressIndicator from "../components/ProgressIndicator";
 import AchievementBadge from "../components/AchievementBadge";
 import SkeletonLoader from "../components/SkeletonLoader";
@@ -38,6 +39,7 @@ interface VocabularyStats {
   learned: number;
   unknown: number;
   total: number;
+  ignored?: number;
 }
 
 const BookDashboard: React.FC = () => {
@@ -58,36 +60,38 @@ const BookDashboard: React.FC = () => {
   useEffect(() => {
     const fetchBook = async () => {
       try {
-        // Load book data first (critical path)
-        const bookResponse = await apiGet(`/books/${bookId}`, token);
-        if (!bookResponse.ok) {
-          throw new Error("Failed to load book");
-        }
-        const bookData = await bookResponse.json();
+        setError(null);
+
+        const [bookData, progressData, vocabStatsData] = await Promise.all([
+          requestCache.get(`book-${bookId}`, async () => {
+            const bookResponse = await apiGet(`/books/${bookId}`, token);
+            if (!bookResponse.ok) {
+              throw new Error("Failed to load book");
+            }
+            return bookResponse.json();
+          }),
+          apiGet(`/reading/book/${bookId}/progress`, token)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          apiGet(`/vocab/book/${bookId}/stats`, token)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+        ]);
+
         setBook(bookData);
         setLoading(false); // Show UI immediately with book info
-        
-        // Load other data in parallel (non-blocking)
-        Promise.all([
-          apiGet(`/reading/book/${bookId}/progress`, token).then(r => r.ok ? r.json() : null).catch(() => null),
-          apiGet(`/vocab/book/${bookId}?limit=1000`, token).then(r => r.ok ? r.json() : null).catch(() => null)
-        ]).then(([progressData, vocabData]) => {
-          if (progressData) {
-            setReadingProgress(progressData);
-          }
-          if (vocabData) {
-            const vocabulary = vocabData.vocabulary || [];
-            const stats: VocabularyStats = {
-              learned: vocabulary.filter((v: any) => v.status === "learned").length,
-              unknown: vocabulary.filter((v: any) => v.status === "unknown").length,
-              total: vocabulary.length,
-            };
-            setVocabStats(stats);
-          }
-        }).catch(err => {
-          console.error("Failed to load additional data:", err);
-          // Non-critical, continue with book data
-        });
+
+        if (progressData) {
+          setReadingProgress(progressData);
+        }
+        if (vocabStatsData) {
+          setVocabStats({
+            learned: vocabStatsData.learned || 0,
+            unknown: vocabStatsData.unknown || 0,
+            total: vocabStatsData.total || 0,
+            ignored: vocabStatsData.ignored || 0,
+          });
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load book");
         setLoading(false);
@@ -124,22 +128,17 @@ const BookDashboard: React.FC = () => {
               // Refresh vocabulary stats when processing completes
               if (updatedBook.processing_status === "completed") {
                 const vocabResponse = await apiGet(
-                  `/vocab/book/${bookId}?limit=1000`,
+                  `/vocab/book/${bookId}/stats`,
                   token,
                 );
                 if (vocabResponse.ok) {
-                  const vocabData = await vocabResponse.json();
-                  const vocabulary = vocabData.vocabulary || [];
-                  const stats: VocabularyStats = {
-                    learned: vocabulary.filter(
-                      (v: any) => v.status === "learned",
-                    ).length,
-                    unknown: vocabulary.filter(
-                      (v: any) => v.status === "unknown",
-                    ).length,
-                    total: vocabulary.length,
-                  };
-                  setVocabStats(stats);
+                  const statsData = await vocabResponse.json();
+                  setVocabStats({
+                    learned: statsData.learned || 0,
+                    unknown: statsData.unknown || 0,
+                    total: statsData.total || 0,
+                    ignored: statsData.ignored || 0,
+                  });
                 }
               }
             }
@@ -165,20 +164,17 @@ const BookDashboard: React.FC = () => {
       if (!bookId || !token) return;
       try {
         const response = await apiGet(
-          `/vocab/book/${bookId}?limit=1000`,
+          `/vocab/book/${bookId}/stats`,
           token,
         );
         if (response.ok) {
-          const data = await response.json();
-          const vocabulary = data.vocabulary || [];
-          const stats: VocabularyStats = {
-            learned: vocabulary.filter((v: any) => v.status === "learned")
-              .length,
-            unknown: vocabulary.filter((v: any) => v.status === "unknown")
-              .length,
-            total: vocabulary.length,
-          };
-          setVocabStats(stats);
+          const statsData = await response.json();
+          setVocabStats({
+            learned: statsData.learned || 0,
+            unknown: statsData.unknown || 0,
+            total: statsData.total || 0,
+            ignored: statsData.ignored || 0,
+          });
         }
       } catch (err) {
         // Silently handle errors - vocabulary might not be ready yet
@@ -199,7 +195,12 @@ const BookDashboard: React.FC = () => {
     if (!vocabStats || vocabStats.total === 0) {
       return { level: "Beginner", percentage: 0, color: "gray" };
     }
-    const masteredPercentage = (vocabStats.learned / vocabStats.total) * 100;
+    const effectiveTotal = Math.max(
+      vocabStats.total - (vocabStats.ignored || 0),
+      0,
+    );
+    const masteredPercentage =
+      effectiveTotal > 0 ? (vocabStats.learned / effectiveTotal) * 100 : 0;
     if (masteredPercentage >= 80) {
       return {
         level: "Advanced",

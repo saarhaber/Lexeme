@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import LogoMark from '../logo.svg';
 
 type NavItem = {
   path: string;
@@ -8,11 +9,6 @@ type NavItem = {
   icon?: string;
   match?: (pathname: string) => boolean;
 };
-
-const SHARED_NAV_ITEMS: NavItem[] = [
-  { path: '/about', label: 'About', icon: 'ℹ️' },
-  { path: '/demo', label: 'Demo', icon: '🎯' },
-];
 
 const Navigation: React.FC = () => {
   const location = useLocation();
@@ -55,7 +51,7 @@ const Navigation: React.FC = () => {
 
   const navItems = useMemo<NavItem[]>(() => {
     if (!isAuthenticated) {
-      return [{ path: '/', label: 'Home', icon: '🏠' }, ...SHARED_NAV_ITEMS];
+      return [];
     }
 
     return [
@@ -65,14 +61,13 @@ const Navigation: React.FC = () => {
         icon: '📚',
         match: (pathname) => pathname === '/books' || pathname.startsWith('/book/'),
       },
-      { path: '/progress', label: 'Progress', icon: '📈' },
       {
         path: '/vocab-lists',
         label: 'Lists',
-        icon: '📝',
+        icon: '🗂️',
         match: (pathname) => pathname.startsWith('/vocab-lists'),
       },
-      ...SHARED_NAV_ITEMS,
+      { path: '/progress', label: 'Progress', icon: '📈' },
     ];
   }, [isAuthenticated]);
 
@@ -80,47 +75,33 @@ const Navigation: React.FC = () => {
     if (item.match) {
       return item.match(location.pathname);
     }
-    if (item.path === '/') {
-      return location.pathname === '/';
-    }
     return location.pathname === item.path;
   };
 
-  const bottomNavItems = isAuthenticated
-    ? navItems.filter((item) => ['/books', '/progress'].includes(item.path))
-    : [];
+  const hasMenu = isAuthenticated && navItems.length > 0;
 
   return (
     <>
       <nav
-        className="sticky top-0 z-40 border-b border-gray-100 bg-white/90 backdrop-blur-md"
+        className="sticky top-0 z-40 border-b border-white/60 bg-white/80 backdrop-blur-xl shadow-[0_10px_35px_rgba(15,23,42,0.08)] supports-[backdrop-filter]:bg-white/70"
         role="navigation"
         aria-label="Primary"
         style={{ paddingTop: 'calc(var(--safe-area-top) + 0.25rem)' }}
       >
         <div
-          className="mx-auto flex w-full items-center justify-between gap-3 px-4 phone:px-5 pb-3"
+          className="mx-auto flex w-full items-center justify-between gap-3 px-4 phone:px-5 py-3"
           style={{ maxWidth: 'var(--app-max-width)' }}
         >
           <Link
             to={isAuthenticated ? '/books' : '/'}
-            className="flex items-center gap-2 text-lg font-heading font-bold text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+            className="flex items-center gap-3 text-lg font-heading font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
             aria-label="Lexeme home"
           >
-            <span className="text-2xl" aria-hidden="true">
-              📘
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 shadow-inner ring-1 ring-blue-100">
+              <img src={LogoMark} alt="Lexeme logo" className="h-7 w-7" />
             </span>
             <span className="text-xl sm:text-2xl">Lexeme</span>
           </Link>
-
-          {isAuthenticated && (
-            <button
-              onClick={() => navigate('/books')}
-              className="hidden rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-primary transition hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:inline-flex"
-            >
-              My Library
-            </button>
-          )}
 
           <div className="flex items-center gap-2">
             {isAuthenticated && user ? (
@@ -129,19 +110,16 @@ const Navigation: React.FC = () => {
                   <span className="text-[10px] uppercase tracking-wide text-gray-400">Signed in</span>
                   <span className="text-sm text-gray-900">{user.username}</span>
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="hidden rounded-full border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 transition hover:border-gray-300 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:inline-flex"
-                >
-                  Logout
-                </button>
-                <button
-                  onClick={() => setIsMenuOpen(true)}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 text-xl text-gray-700 transition hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:hidden"
-                  aria-label="Open menu"
-                >
-                  ☰
-                </button>
+                {hasMenu && (
+                  <button
+                    onClick={() => setIsMenuOpen(true)}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 text-xl text-gray-700 transition hover:border-gray-300 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    aria-label="Open menu"
+                    aria-expanded={isMenuOpen}
+                  >
+                    ☰
+                  </button>
+                )}
               </>
             ) : (
               <Link
@@ -154,85 +132,14 @@ const Navigation: React.FC = () => {
           </div>
         </div>
 
-        <div
-          className="mx-auto w-full overflow-x-auto px-4 phone:px-5 pb-3"
-          style={{ maxWidth: 'var(--app-max-width)' }}
-        >
-          <div className="flex items-center gap-2">
-            {navItems.map((item) => {
-              const active = isItemActive(item);
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={closeMenu}
-                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-2 text-xs sm:text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 whitespace-nowrap ${
-                    active
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
-                  }`}
-                  aria-current={active ? 'page' : undefined}
-                  title={item.label}
-                >
-                  {item.icon && (
-                    <span className="text-base sm:text-lg" aria-hidden="true">
-                      {item.icon}
-                    </span>
-                  )}
-                  <span className="hidden sm:inline">{item.label}</span>
-                  <span className="sm:hidden">{item.label.length > 8 ? item.label.substring(0, 6) + '..' : item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
       </nav>
 
-      {isAuthenticated && bottomNavItems.length > 0 && (
+      {hasMenu && isMenuOpen && (
         <div
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-md sm:hidden"
-          role="navigation"
-          aria-label="Quick actions"
-          style={{ paddingBottom: 'calc(0.5rem + var(--safe-area-bottom))' }}
-        >
-          <div
-            className="mx-auto flex w-full items-center justify-around px-6 pt-3"
-            style={{ maxWidth: 'var(--app-max-width)' }}
-          >
-            {bottomNavItems.map((item) => {
-              const active = isItemActive(item);
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={`flex flex-col items-center text-xs font-semibold transition ${
-                    active ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'
-                  }`}
-                  aria-current={active ? 'page' : undefined}
-                  title={item.label}
-                >
-                  <span
-                    className={`mb-1 flex h-10 w-10 items-center justify-center rounded-full text-lg transition-colors ${
-                      active ? 'bg-blue-50' : 'bg-gray-100'
-                    }`}
-                    aria-hidden="true"
-                  >
-                    {item.icon}
-                  </span>
-                  <span className="whitespace-nowrap">{item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {isAuthenticated && isMenuOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm sm:hidden"
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
-          aria-label="Account menu"
+          aria-label="Navigation menu"
           onClick={closeMenu}
         >
           <div
@@ -262,9 +169,9 @@ const Navigation: React.FC = () => {
                     key={`${item.path}-drawer`}
                     to={item.path}
                     onClick={closeMenu}
-                    className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-base font-medium transition ${
+                    className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition ${
                       active
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        ? 'border-blue-500/80 bg-blue-50 text-blue-700 shadow-[0_8px_20px_rgba(59,130,246,0.16)]'
                         : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
                     }`}
                   >
@@ -279,7 +186,7 @@ const Navigation: React.FC = () => {
 
             <button
               onClick={handleLogout}
-              className="mt-6 flex w-full items-center justify-center rounded-2xl bg-gray-900 py-3 text-base font-semibold text-white transition hover:bg-gray-800"
+              className="mt-6 flex w-full items-center justify-center rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white transition hover:bg-gray-800"
             >
               Log out
             </button>

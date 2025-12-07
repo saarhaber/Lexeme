@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import shutil
@@ -13,6 +14,7 @@ from ..models.book import Book, RawText
 from ..services.book_processor import BookMetadataExtractor
 from ..services.comprehensive_vocabulary_processor import ComprehensiveVocabularyProcessor
 from ..services.dictionary_service import DictionaryService
+from ..utils.security import get_current_user
 from ..utils.text_utils import sanitize_text
 
 router = APIRouter()
@@ -38,6 +40,12 @@ try:
 except ImportError:
     spacy_available = False
     print("⚠️  spaCy not available, using fallback NLP processors")
+
+def _save_upload_file(upload: UploadFile, destination: Path):
+    """Persist an upload to disk using a larger buffer for speed."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with open(destination, "wb") as buffer:
+        shutil.copyfileobj(upload.file, buffer, length=1024 * 1024)  # 1MB chunks
 
 def process_book_background(book_id: int, file_path: str, text_content: str, language: str, word_count: int):
     """Background processing function for book vocabulary extraction."""
@@ -99,7 +107,7 @@ def process_book_background(book_id: int, file_path: str, text_content: str, lan
 async def upload_book(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(lambda: {"user_id": 1})  # TODO: Proper auth injection
+    current_user: dict = Depends(get_current_user),
 ):
     try:
         # Validate file type
@@ -119,12 +127,11 @@ async def upload_book(
 
         # Save uploaded file
         print(f"Saving file to: {file_path}")
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        await run_in_threadpool(_save_upload_file, file, file_path)
 
         # Extract metadata from the book (quick operation)
         print("Extracting metadata...")
-        title, author = metadata_extractor.extract_metadata(str(file_path))
+        title, author = await run_in_threadpool(metadata_extractor.extract_metadata, str(file_path))
         print(f"Extracted metadata - Title: {title}, Author: {author}")
 
         # Use fallback title if extraction failed
@@ -134,7 +141,7 @@ async def upload_book(
 
         # Extract text for language detection (quick operation)
         print("Extracting text for language detection...")
-        text_content, word_count = metadata_extractor.extract_text(str(file_path))
+        text_content, word_count = await run_in_threadpool(metadata_extractor.extract_text, str(file_path))
         print(f"Extracted text - Length: {len(text_content)} characters, Word count: {word_count}")
         
         if not text_content.strip():

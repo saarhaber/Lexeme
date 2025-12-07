@@ -38,6 +38,23 @@ const WordIntelligenceModal: React.FC<WordIntelligenceModalProps> = ({
   const morphology = item.lemma.morphology || {};
   const wordForms = Array.isArray(morphology?.forms) ? morphology.forms : null;
   
+  const cleanText = (text: string): string => {
+    if (!text) return '';
+    const collapsed = text.replace(/\s+/g, ' ').trim();
+    const withoutQuotes = collapsed.replace(/^[“"']+|[”"']+$/g, '');
+    const withoutTrailingPunctuation = withoutQuotes.replace(/[.,;:]+$/, '');
+    // Normalize shouting translations like "ROUTES" -> "routes"
+    if (
+      withoutTrailingPunctuation &&
+      withoutTrailingPunctuation === withoutTrailingPunctuation.toUpperCase() &&
+      withoutTrailingPunctuation.length > 2 &&
+      !withoutTrailingPunctuation.includes(' ')
+    ) {
+      return withoutTrailingPunctuation.toLowerCase();
+    }
+    return withoutTrailingPunctuation;
+  };
+
   // Extract data
   const pos = item.lemma.pos || 'NOUN';
   const definition = item.lemma.definition || '';
@@ -64,11 +81,12 @@ const WordIntelligenceModal: React.FC<WordIntelligenceModalProps> = ({
         !trimmed.toLowerCase().startsWith('feminine:') &&
         !trimmed.toLowerCase().startsWith('masculine:');
     });
-    return lines[0]?.trim() || text.trim();
+    const firstLine = lines[0]?.trim() || text.trim();
+    return cleanText(firstLine);
   };
 
   // Get translation (first line of definition, typically)
-  const translation = definition.split('\n')[0]?.trim() || definition.trim();
+  const translation = cleanText(definition.split('\n')[0] || definition);
   
   return (
     <div 

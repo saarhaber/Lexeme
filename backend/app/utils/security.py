@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 import os
+from database import get_db
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -49,7 +50,7 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: Optional[Session] = None
+    db: Session = Depends(get_db)
 ) -> dict:
     """Get current user from JWT token."""
     from app.models.user import User
@@ -72,19 +73,6 @@ def get_current_user(
         user_id = int(user_id_str)
     except (ValueError, TypeError):
         raise credentials_exception
-    
-    # Get database session if not provided
-    if db is None:
-        try:
-            import sys
-            import os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-            from database import get_db
-            db_gen = get_db()
-            db = next(db_gen)
-        except Exception as e:
-            print(f"Warning: Could not get db session: {e}")
-            raise credentials_exception
     
     # Get user from database
     try:

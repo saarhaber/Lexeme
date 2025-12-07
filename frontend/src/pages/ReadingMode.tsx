@@ -35,7 +35,7 @@ interface WordLookupResponse {
 const ReadingMode: React.FC = () => {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const { token, loading: authLoading } = useAuth();
   
   const [text, setText] = useState<string>('');
   const [position, setPosition] = useState<number>(0);
@@ -53,11 +53,18 @@ const ReadingMode: React.FC = () => {
   const [bookmarkLabel, setBookmarkLabel] = useState('');
 
   useEffect(() => {
-    if (bookId) {
-      loadReadingText();
-      loadBookmarks();
+    if (!bookId || authLoading) {
+      return;
     }
-  }, [bookId]);
+    if (!token) {
+      setError('You need to be logged in to read this book.');
+      setLoading(false);
+      return;
+    }
+    setError('');
+    loadReadingText();
+    loadBookmarks();
+  }, [bookId, token, authLoading]);
 
   const loadBookmarks = () => {
     const saved = localStorage.getItem(`bookmarks_${bookId}`);

@@ -10,6 +10,7 @@ from ..models.book import Book, RawText
 from ..models.lemma import Token
 from ..models.srs import SRSProgress
 from ..models.reading_progress import ReadingProgress
+from ..utils.security import get_current_user
 
 router = APIRouter()
 
@@ -32,18 +33,22 @@ class BookSummary(BaseModel):
     estimated_difficulty: str
 
 @router.get("/", response_model=List[BookResponse])
-async def get_books(user_id: Optional[int] = None, db: Session = Depends(get_db)):
-    """Get all books. If user_id is provided, filters by user_id. Otherwise returns all books."""
-    query = db.query(Book)
-    if user_id:
-        query = query.filter(Book.user_id == user_id)
-    else:
-        # If no user_id provided, return ALL books (useful for debugging and when auth isn't set up)
-        print(f"[Books API] Loading all books (no user_id filter)")
+async def get_books(
+    user_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get books for the current user (or a specific user_id if provided).
+    Filters by user to avoid returning the entire library and to keep
+    responses fast for large datasets.
+    """
+    target_user_id = user_id or current_user.get("user_id")
 
+    query = db.query(Book).filter(Book.user_id == target_user_id)
     books = query.order_by(Book.upload_date.desc()).all()
-    print(f"[Books API] Found {len(books)} books")
-    
+    print(f"[Books API] Returning {len(books)} books for user {target_user_id}")
+
     result = [
         BookResponse(
             id=book.id,
@@ -58,8 +63,7 @@ async def get_books(user_id: Optional[int] = None, db: Session = Depends(get_db)
         )
         for book in books
     ]
-    
-    print(f"[Books API] Returning {len(result)} books")
+
     return result
 
 @router.get("/{book_id}", response_model=BookResponse)

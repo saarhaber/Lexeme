@@ -1,5 +1,5 @@
 import React, { useEffect, Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import Navigation from './components/Navigation';
@@ -16,6 +16,7 @@ const ReadingMode = lazy(() => import('./pages/ReadingMode'));
 const BooksManagement = lazy(() => import('./pages/BooksManagement'));
 const ProgressDashboard = lazy(() => import('./pages/ProgressDashboard'));
 const VocabLists = lazy(() => import('./pages/VocabLists'));
+const SRSReview = lazy(() => import('./pages/SRSReview'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 const DemoExperience = lazy(() => import('./pages/DemoExperience'));
 const About = lazy(() => import('./pages/About'));
@@ -58,10 +59,10 @@ function AppRoutes() {
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         <main
           id="main-content"
-          className="flex-1 w-full mx-auto px-4 phone:px-5 sm:px-6 lg:px-8 py-8 pt-24 sm:pt-28 pb-16"
+          className="flex-1 w-full mx-auto px-4 phone:px-5 sm:px-6 lg:px-10 py-6 pt-20 sm:pt-24 pb-12"
           style={{
             maxWidth: 'var(--app-max-width)',
-            paddingBottom: 'calc(6rem + var(--safe-area-bottom))',
+            paddingBottom: 'calc(4.5rem + var(--safe-area-bottom))',
           }}
         >
           <Suspense fallback={<SkeletonLoader />}>
@@ -128,6 +129,14 @@ function AppRoutes() {
                   }
                 />
                 <Route
+                  path="/review"
+                  element={
+                    <ProtectedRoute>
+                      <SRSReview />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path="/vocab-lists"
                   element={
                     <ProtectedRoute>
@@ -147,6 +156,28 @@ function AppRoutes() {
             </PageTransition>
           </Suspense>
         </main>
+        <footer className="border-t border-gray-100 bg-white/90 backdrop-blur-md">
+          <div
+            className="mx-auto flex w-full items-center justify-between px-4 phone:px-5 sm:px-6 lg:px-8 py-4 text-sm text-gray-600"
+            style={{ maxWidth: 'var(--app-max-width)' }}
+          >
+            <span className="font-semibold text-gray-800">Lexeme</span>
+            <div className="flex items-center gap-4">
+              <Link
+                to="/about"
+                className="transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white rounded-md"
+              >
+                About
+              </Link>
+              <Link
+                to="/demo"
+                className="transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white rounded-md"
+              >
+                Demo
+              </Link>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
   );

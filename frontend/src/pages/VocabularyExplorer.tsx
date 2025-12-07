@@ -107,7 +107,7 @@ const VocabularyExplorer: React.FC = () => {
       // For initial load, use smaller page size for faster first render
       const pageSize = append ? 100 : 50;
       const response = await apiGet(
-        `/vocab/book/${bookId}?sort_by=${sortBy}&page=${currentPage}&limit=${pageSize}${statusQuery}`,
+        `/vocab/book/${bookId}?sort_by=${sortBy}&page=${currentPage}&limit=${pageSize}${statusQuery}&include_word_entry=false`,
         token
       );
       
@@ -137,7 +137,7 @@ const VocabularyExplorer: React.FC = () => {
             setTimeout(async () => {
               try {
                 const remainingResponse = await apiGet(
-                  `/vocab/book/${bookId}?sort_by=${sortBy}&page=1&limit=100${statusQuery}`,
+                  `/vocab/book/${bookId}?sort_by=${sortBy}&page=1&limit=100${statusQuery}&include_word_entry=false`,
                   token
                 );
                 if (remainingResponse.ok) {
@@ -175,7 +175,7 @@ const VocabularyExplorer: React.FC = () => {
           // Limit to reasonable size to avoid loading too much at once
           const limit = Math.min(100, currentCount - lastKnownCount + 20); // Fetch a bit more to ensure we get all new words
           const vocabResponse = await apiGet(
-            `/vocab/book/${bookId}?sort_by=chronological&page=1&limit=${limit}`,
+            `/vocab/book/${bookId}?sort_by=chronological&page=1&limit=${limit}&include_word_entry=false`,
             token
           );
           
@@ -556,7 +556,18 @@ const VocabularyItem = React.memo<{
         !trimmed.toLowerCase().startsWith('suffix:');
     });
     // Join and clean up - take first line only for card view
-    return lines[0]?.trim() || '';
+    const firstLine = lines[0]?.trim() || '';
+    const withoutQuotes = firstLine.replace(/^[“"']+|[”"']+$/g, '');
+    const withoutTrailingPunctuation = withoutQuotes.replace(/[.,;:]+$/, '');
+    if (
+      withoutTrailingPunctuation &&
+      withoutTrailingPunctuation === withoutTrailingPunctuation.toUpperCase() &&
+      withoutTrailingPunctuation.length > 2 &&
+      !withoutTrailingPunctuation.includes(' ')
+    ) {
+      return withoutTrailingPunctuation.toLowerCase();
+    }
+    return withoutTrailingPunctuation;
   };
 
   const pos = item.lemma.pos || 'NOUN';

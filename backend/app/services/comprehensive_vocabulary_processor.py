@@ -24,6 +24,18 @@ class ComprehensiveVocabularyProcessor:
         self.p = inflect.engine()
         self.nlp_tools = self.book_processor.nlp_tools
         
+        # Cache expensive NLP resources so uploads do not pay load cost repeatedly
+        self._spacy_models = {}
+        self._enhanced_stop_words_cache = {}
+        self._spacy_disabled_components = ["parser", "ner", "textcat"]
+        self._spacy_model_names = {
+            'en': 'en_core_web_sm',
+            'it': 'it_core_news_sm',
+            'es': 'es_core_news_sm',
+            'fr': 'fr_core_news_sm',
+            'de': 'de_core_news_sm',
+        }
+        
         # Create comprehensive word database for different languages
         self.language_patterns = {
             'it': self._italian_patterns,
@@ -38,6 +50,29 @@ class ComprehensiveVocabularyProcessor:
         
         # Word family patterns (will be expanded with linguistic analysis)
         self.word_families = {}
+    
+    def _get_spacy_model(self, language: str):
+        """
+        Load and cache spaCy models with heavy pipeline components disabled.
+        This keeps lemma/POS accuracy while avoiding repeated load overhead.
+        """
+        if language in self._spacy_models:
+            return self._spacy_models[language]
+        
+        try:
+            import spacy
+        except ImportError:
+            return None
+        
+        model_name = self._spacy_model_names.get(language, 'en_core_web_sm')
+        try:
+            nlp = spacy.load(model_name, disable=self._spacy_disabled_components)
+            # Allow large documents without reallocations
+            nlp.max_length = max(nlp.max_length, 2_000_000)
+            self._spacy_models[language] = nlp
+            return nlp
+        except OSError:
+            return None
         
     def _italian_patterns(self) -> Dict[str, List[str]]:
         """Italian morphological patterns for word family grouping."""
@@ -159,64 +194,50 @@ class ComprehensiveVocabularyProcessor:
     
     def _extract_all_words(self, text: str, language: str) -> List[str]:
         """Extract ALL words from text without filtering. Improved to prevent broken words."""
-        # Use spaCy for better tokenization if available (preserves word boundaries)
-        try:
-            import spacy
-            spacy_models = {
-                'en': 'en_core_web_sm',
-                'it': 'it_core_news_sm',
-                'es': 'es_core_news_sm',
-                'fr': 'fr_core_news_sm',
-                'de': 'de_core_news_sm',
-            }
-            model_name = spacy_models.get(language, 'en_core_web_sm')
-            try:
-                nlp = spacy.load(model_name)
-                # Process in chunks to avoid memory issues
-                words = []
-                chunk_size = 10000  # Process 10k chars at a time
-                for i in range(0, len(text), chunk_size):
-                    chunk = text[i:i+chunk_size]
-                    doc = nlp(chunk)
-                    # Handle Italian/French contractions that may be split by spaCy
-                    # Merge tokens like "nell'" + "'" + "estate" back to "nell'estate"
-                    tokens = list(doc)
-                    j = 0
-                    while j < len(tokens):
-                        token = tokens[j]
-                        # Check if this is a contraction pattern (word + apostrophe + word)
-                        if (j + 2 < len(tokens) and 
-                            token.is_alpha and 
-                            tokens[j+1].text == "'" and 
-                            tokens[j+2].is_alpha):
-                            # Merge contraction: "nell'" + "'" + "estate" -> "nell'estate"
-                            merged = token.text + "'" + tokens[j+2].text
-                            # Preserve capitalization for proper nouns
-                            if token.pos_ == 'PROPN' or tokens[j+2].pos_ == 'PROPN':
-                                words.append(merged.strip())
-                            else:
-                                words.append(merged.lower().strip())
-                            j += 3
-                        elif not token.is_punct and not token.is_space:
-                            # Regular token - include if it's alphabetic or contains apostrophe
-                            # Preserve capitalization for proper nouns (PROPN)
-                            if token.pos_ == 'PROPN':
-                                # Keep original capitalization for proper nouns
-                                token_text = token.text.strip()
-                            else:
-                                token_text = token.text.lower().strip()
-                            if len(token_text.replace("'", "")) >= 2 and (token.is_alpha or "'" in token_text):
-                                words.append(token_text)
-                            j += 1
+        nlp = self._get_spacy_model(language)
+        if nlp:
+            # Process in chunks to avoid memory issues
+            words = []
+            chunk_size = 10000  # Process 10k chars at a time
+            for i in range(0, len(text), chunk_size):
+                chunk = text[i:i+chunk_size]
+                doc = nlp(chunk)
+                # Handle Italian/French contractions that may be split by spaCy
+                # Merge tokens like "nell'" + "'" + "estate" back to "nell'estate"
+                tokens = list(doc)
+                j = 0
+                while j < len(tokens):
+                    token = tokens[j]
+                    # Check if this is a contraction pattern (word + apostrophe + word)
+                    if (j + 2 < len(tokens) and 
+                        token.is_alpha and 
+                        tokens[j+1].text == "'" and 
+                        tokens[j+2].is_alpha):
+                        # Merge contraction: "nell'" + "'" + "estate" -> "nell'estate"
+                        merged = token.text + "'" + tokens[j+2].text
+                        # Preserve capitalization for proper nouns
+                        if token.pos_ == 'PROPN' or tokens[j+2].pos_ == 'PROPN':
+                            words.append(merged.strip())
                         else:
-                            j += 1
-                # Fix incorrectly split words from PDF extraction (e.g., "pubbl icato" -> "pubblicato")
-                words = self._merge_split_words(words, language)
-                return words
-            except (OSError, ImportError):
-                pass  # Fall through to regex method
-        except ImportError:
-            pass  # spaCy not available, use regex method
+                            words.append(merged.lower().strip())
+                        j += 3
+                    elif not token.is_punct and not token.is_space:
+                        # Regular token - include if it's alphabetic or contains apostrophe
+                        # Preserve capitalization for proper nouns (PROPN)
+                        if token.pos_ == 'PROPN':
+                            # Keep original capitalization for proper nouns
+                            token_text = token.text.strip()
+                        else:
+                            token_text = token.text.lower().strip()
+                        if len(token_text.replace("'", "")) >= 2 and (token.is_alpha or "'" in token_text):
+                            words.append(token_text)
+                        j += 1
+                    else:
+                        j += 1
+            # Fix incorrectly split words from PDF extraction (e.g., "pubbl icato" -> "pubblicato")
+            words = self._merge_split_words(words, language)
+            words = self._filter_suffix_fragments(words, language)
+            return words
         
         # Fallback: regex-based extraction (improved to preserve word boundaries)
         # Preserve capitalization for proper nouns - don't lowercase the entire text
@@ -249,6 +270,7 @@ class ComprehensiveVocabularyProcessor:
         
         # Fix incorrectly split words from PDF extraction (e.g., "pubbl icato" -> "pubblicato")
         words = self._merge_split_words(words, language)
+        words = self._filter_suffix_fragments(words, language)
         
         return words
     
@@ -302,6 +324,17 @@ class ComprehensiveVocabularyProcessor:
                              next_word.startswith('licito') or next_word.startswith('licuto'))):
                             should_merge = True
                     
+                    # Pattern 2.5: Generic short-prefix merge for PDF line breaks (e.g., "pr" + "imi" -> "primi")
+                    if (not should_merge and language == 'it' and len(current_word) <= 3 and len(next_word) >= 3):
+                        merged_len = len(merged)
+                        if 4 <= merged_len <= 20:
+                            try:
+                                freq_score = zipf_frequency(merged, language, wordlist='best')
+                            except Exception:
+                                freq_score = 0.0
+                            if freq_score > 1.5:
+                                should_merge = True
+                    
                     # Pattern 3: Use spaCy validation if available (most reliable)
                     if should_merge:
                         try:
@@ -346,6 +379,23 @@ class ComprehensiveVocabularyProcessor:
                 i += 1
         
         return merged_words
+
+    def _filter_suffix_fragments(self, words: List[str], language: str) -> List[str]:
+        """
+        Remove fragments that are likely line-break suffix leftovers (e.g., solitary 'ità'/'ita').
+        These often appear when PDFs split words like 'città' across lines, leaving the suffix alone.
+        """
+        if language != 'it':
+            return words
+        
+        filtered = []
+        for word in words:
+            normalized = word.lower().strip("’'")
+            # Drop tiny suffix-only fragments such as 'ita' or 'ità'
+            if normalized in {"ita", "ità"} or (normalized.endswith(("ita", "ità")) and len(normalized) <= 4):
+                continue
+            filtered.append(word)
+        return filtered
     
     def _group_word_families(self, words: List[str], language: str) -> Dict[str, str]:
         """
@@ -788,6 +838,9 @@ class ComprehensiveVocabularyProcessor:
     
     def _get_enhanced_stop_words(self, language: str) -> set:
         """Get enhanced stop words using NLTK."""
+        if language in self._enhanced_stop_words_cache:
+            return self._enhanced_stop_words_cache[language]
+        
         enhanced_stop_words = set()
         
         if 'nltk' in self.nlp_tools:
@@ -812,6 +865,7 @@ class ComprehensiveVocabularyProcessor:
                 print(f"Could not load NLTK stop words: {e}")
                 print("Using basic stop words only")
         
+        self._enhanced_stop_words_cache[language] = enhanced_stop_words
         return enhanced_stop_words
     
     def save_comprehensive_analysis(self, analysis: Dict, book_id: int, db: Session):
@@ -860,24 +914,12 @@ class ComprehensiveVocabularyProcessor:
         from ..models.lemma import Token
         
         # Try to use spaCy for proper lemmatization
-        spacy_nlp = None
-        try:
-            import spacy
-            spacy_models = {
-                'en': 'en_core_web_sm',
-                'it': 'it_core_news_sm',
-                'es': 'es_core_news_sm',
-                'fr': 'fr_core_news_sm',
-                'de': 'de_core_news_sm',
-            }
-            model_name = spacy_models.get(language, 'en_core_web_sm')
-            try:
-                spacy_nlp = spacy.load(model_name)
-                print(f"✅ Using spaCy model {model_name} for batch lemmatization")
-            except OSError:
-                print(f"⚠️  spaCy model {model_name} not available, using basic lemmatization")
-        except ImportError:
-            print("⚠️  spaCy not installed, using basic lemmatization")
+        model_name = self._spacy_model_names.get(language, 'en_core_web_sm')
+        spacy_nlp = self._get_spacy_model(language)
+        if spacy_nlp:
+            print(f"✅ Using spaCy model {model_name} (cached) for batch lemmatization")
+        else:
+            print(f"⚠️  spaCy model {model_name} not available, using basic lemmatization")
         
         # OPTIMIZED: Batch process all unique words at once with spaCy
         unique_words = list(analysis['vocabulary'].keys())
@@ -890,11 +932,11 @@ class ComprehensiveVocabularyProcessor:
             batch_size = 1000
             for i in range(0, len(unique_words), batch_size):
                 batch = unique_words[i:i+batch_size]
-                # Create a simple text with all words separated by spaces
-                batch_text = ' '.join(batch)
                 try:
-                    doc = spacy_nlp(batch_text)
-                    for token in doc:
+                    for doc in spacy_nlp.pipe(batch, batch_size=128):
+                        if not doc:
+                            continue
+                        token = doc[0]  # Each entry is a single word
                         word_lower = token.text.lower().strip()
                         if word_lower in unique_words:
                             # Preserve original capitalization for proper nouns
@@ -1266,16 +1308,14 @@ class ComprehensiveVocabularyProcessor:
                 canonical_word_form = canonical_word
                 canonical_word_data = canonical_data
                 positions = canonical_word_data.get('positions', [])
-                frequency = canonical_word_data.get('frequency', 1)
+                frequency = int(canonical_word_data.get('frequency', 1) or 1)
                 
-                # Limit tokens per lemma to prevent excessive database writes
-                # Only store a sample of positions, not all occurrences
-                max_tokens_per_lemma = min(frequency, 20)  # Max 20 tokens per lemma (reduced from 50)
+                # Store one token per occurrence so in-book frequency counts remain accurate
+                max_tokens_per_lemma = max(frequency, 1)
                 
                 if positions and len(positions) > 0:
-                    # Use actual positions, but limit count - sample evenly
-                    step = max(1, len(positions) // max_tokens_per_lemma)
-                    sampled_positions = positions[::step][:max_tokens_per_lemma]
+                    # Use actual positions to keep a precise token count for the book
+                    sampled_positions = positions[:max_tokens_per_lemma]
                     for pos_idx in sampled_positions:
                         token_records.append({
                             'book_id': book_id,
@@ -1285,8 +1325,8 @@ class ComprehensiveVocabularyProcessor:
                             'sentence_context': ''  # Skip context extraction for speed
                         })
                 else:
-                    # Create tokens based on frequency (sample)
-                    for i in range(min(max_tokens_per_lemma, 5)):  # Max 5 if no positions
+                    # Positions missing—still record frequency accurately
+                    for i in range(max_tokens_per_lemma):
                         token_records.append({
                             'book_id': book_id,
                             'lemma_id': lemma_id,

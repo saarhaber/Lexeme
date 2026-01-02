@@ -138,18 +138,29 @@ class DictionaryService:
                     if existing_lemma.morphology:
                         result['grammar'] = existing_lemma.morphology
                     result['source'] = 'database'
-                    self.cache[cache_key] = dict(result)
-                    return result
+                    # Heuristic: sometimes older cached MT results are clearly wrong
+                    # ("tuttora" -> "employees", "facevamo" -> "we would use").
+                    # If the cached definition looks suspicious, try Wiktionary once
+                    # to improve correctness. Avoid doing this for normal single-word
+                    # translations to keep bulk processing fast.
+                    if not self._should_refresh_cached_definition(result['translation'], lookup_word, language):
+                        self.cache[cache_key] = dict(result)
+                        return result
             except Exception as e:
                 # If database lookup fails, continue to API fallbacks
                 print(f"[DictionaryService] Database lookup error: {e}")
-        
+
         # SECONDARY SOURCE: Try direct Wiktionary parsing with wiktextract (BEST QUALITY)
         if self.wiktextract_service:
             wiktextract_result = self.wiktextract_service.get_word(lookup_word, language, target_language)
             if wiktextract_result and (wiktextract_result.get('translation') or wiktextract_result.get('definition')):
                 # Merge wiktextract data into result
                 result = self._merge_kaikki_result(result, wiktextract_result, word_clean, lookup_word, word_lower)
+                # Final cleanup (ensure translation is populated even when only definition is present)
+                result['translation'] = self._sanitize_translation(result.get('translation', ''), lookup_word, language)
+                if not result['translation']:
+                    result['translation'] = self._sanitize_translation(result.get('definition', ''), lookup_word, language)
+                result['definition'] = self._sanitize_translation(result.get('definition', ''), lookup_word, language, allow_blank=True)
                 # If we got good data, use it and skip fallbacks
                 if result.get('translation') or result.get('definition'):
                     self.cache[cache_key] = dict(result)
@@ -161,6 +172,11 @@ class DictionaryService:
             if kaikki_result and (kaikki_result.get('translation') or kaikki_result.get('definition')):
                 # Merge kaikki data into result
                 result = self._merge_kaikki_result(result, kaikki_result, word_clean, lookup_word, word_lower)
+                # Final cleanup (ensure translation is populated even when only definition is present)
+                result['translation'] = self._sanitize_translation(result.get('translation', ''), lookup_word, language)
+                if not result['translation']:
+                    result['translation'] = self._sanitize_translation(result.get('definition', ''), lookup_word, language)
+                result['definition'] = self._sanitize_translation(result.get('definition', ''), lookup_word, language, allow_blank=True)
                 # If we got good data, use it and skip fallbacks
                 if result.get('translation') or result.get('definition'):
                     self.cache[cache_key] = dict(result)
@@ -184,6 +200,26 @@ class DictionaryService:
         
         self.cache[cache_key] = dict(result)
         return result
+
+    def _should_refresh_cached_definition(self, definition: str, source: str, language: str) -> bool:
+        """Return True if cached definition looks like a bad MT artifact."""
+        if not definition or language == "en":
+            return False
+        cleaned = (definition or "").strip()
+        if not cleaned:
+            return False
+        lower = cleaned.lower()
+        words = lower.split()
+        # MT artifacts / conjugated sentence-like outputs
+        pronoun_starts = {"i", "we", "you", "he", "she", "they"}
+        if words and words[0] in pronoun_starts:
+            return True
+        if " would " in f" {lower} ":
+            return True
+        # Suspicious plural noun for non-English lemma (e.g., "employees")
+        if len(words) == 1 and words[0].endswith("s") and len(source or "") >= 5:
+            return True
+        return False
     
     def _normalize_word_form(self, word: str, language: str) -> str:
         """

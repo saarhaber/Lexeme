@@ -75,9 +75,6 @@ class WiktextractService:
         Returns:
             Dictionary with parsed wiktextract data, or None if not found
         """
-        if not WIKTEXTRACT_AVAILABLE:
-            return None
-        
         if not word or not language:
             return None
         
@@ -86,8 +83,14 @@ class WiktextractService:
         if cache_key in self._cache:
             return self._cache[cache_key]
         
-        # Get Wiktionary language code
-        wiktionary_lang = self.LANGUAGE_MAP.get(language.lower(), language.lower())
+        # Fetch from English Wiktionary by default.
+        #
+        # Reason: non-English Wiktionary editions use localized language headers
+        # (e.g. it.wiktionary uses "==Italiano=="), which breaks our simple
+        # extractor that expects English language section titles ("==Italian==").
+        # English Wiktionary contains sections for many source languages and is
+        # the most consistent target for cross-language lookups.
+        wiktionary_lang = "en"
         
         try:
             # Be respectful with rate limiting
@@ -98,8 +101,12 @@ class WiktextractService:
             if not page_content:
                 return None
             
-            # Parse with wiktextract
-            parsed_data = self._parse_with_wiktextract(page_content, word, language, target_language)
+            # Parse using wiktextract when available; otherwise fall back to
+            # lightweight wikitext extraction.
+            if WIKTEXTRACT_AVAILABLE:
+                parsed_data = self._parse_with_wiktextract(page_content, word, language, target_language)
+            else:
+                parsed_data = self._simple_extract_from_wikitext(page_content, word, language, target_language)
             
             if parsed_data:
                 self._cache[cache_key] = parsed_data
@@ -135,7 +142,16 @@ class WiktextractService:
                 'rvslots': 'main',
             }
             
-            response = requests.get(api_url, params=params, timeout=self.timeout)
+            response = requests.get(
+                api_url,
+                params=params,
+                timeout=self.timeout,
+                headers={
+                    # Wiktionary is more reliable with an explicit UA; some
+                    # requests may be blocked/throttled without it.
+                    "User-Agent": "tuttora-app/1.0 (dictionary lookup)"
+                },
+            )
             
             if response.status_code != 200:
                 return None
@@ -150,8 +166,16 @@ class WiktextractService:
                 
                 revisions = page_data.get('revisions', [])
                 if revisions:
-                    content = revisions[0].get('slots', {}).get('main', {}).get('*')
-                    return content
+                    main_slot = revisions[0].get('slots', {}).get('main', {}) or {}
+                    # MediaWiki has used multiple keys over time:
+                    # - legacy: ["*"]
+                    # - newer: ["content"]
+                    content = main_slot.get('*') or main_slot.get('content')
+                    if content:
+                        return content
+                    # Extremely old format (no slots)
+                    if '*' in revisions[0]:
+                        return revisions[0].get('*')
             
             return None
             
@@ -236,32 +260,128 @@ class WiktextractService:
             if ipa and ipa not in result['pronunciations']:
                 result['pronunciations'].append(ipa)
         
+        def _strip_wikitext_markup(text: str) -> str:
+            """Light cleanup for wikitext -> displayable text."""
+            if not text:
+                return ""
+            cleaned = text
+            # Keep display text from links
+            cleaned = re.sub(r"\[\[([^\]|]+)\|([^\]]+)\]\]", r"\2", cleaned)
+            cleaned = re.sub(r"\[\[([^\]]+)\]\]", r"\1", cleaned)
+            # Drop HTML comments
+            cleaned = re.sub(r"<!--.*?-->", "", cleaned, flags=re.DOTALL)
+            # Remove some common formatting
+            cleaned = cleaned.replace("''", "")
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            return cleaned
+
+        def _humanize_inflection_template(raw_defn: str) -> Optional[str]:
+            """
+            Convert common en.wiktionary inflection templates into a readable English gloss.
+            Example:
+              {{inflection of|it|fare||1|p|impf|ind}}
+              -> "inflection of fare (first-person plural imperfect indicative)"
+            """
+            if not raw_defn:
+                return None
+            m = re.search(r"\{\{inflection of\|([^|}]+)\|([^|}]+)([^}]*)\}\}", raw_defn, re.IGNORECASE)
+            if not m:
+                m = re.search(r"\{\{infl of\|([^|}]+)\|([^|}]+)([^}]*)\}\}", raw_defn, re.IGNORECASE)
+            if not m:
+                return None
+            # lang_code = (m.group(1) or "").strip().lower()
+            lemma = (m.group(2) or "").strip()
+            rest = (m.group(3) or "")
+            # Split remaining params (dropping leading '|')
+            params = [p for p in rest.split("|") if p]
+
+            # Minimal mapping for common person/number/tense/mood codes.
+            code_map = {
+                "1": "first-person",
+                "2": "second-person",
+                "3": "third-person",
+                "s": "singular",
+                "p": "plural",
+                "impf": "imperfect",
+                "pres": "present",
+                "past": "past",
+                "fut": "future",
+                "ind": "indicative",
+                "sub": "subjunctive",
+                "cond": "conditional",
+                "imp": "imperative",
+            }
+            # Keep only recognizable tags (skip empty/positional blanks)
+            tags: List[str] = []
+            for p in params:
+                p_clean = p.strip().lower()
+                if not p_clean:
+                    continue
+                mapped = code_map.get(p_clean)
+                if mapped and mapped not in tags:
+                    tags.append(mapped)
+
+            tag_str = " ".join(tags).strip()
+            if tag_str:
+                return f"inflection of {lemma} ({tag_str})"
+            return f"inflection of {lemma}"
+
+        # Detect "form of" / "inflection of" templates to avoid bad MT fallbacks.
+        # Example pages like "facevamo" are typically "verb form" entries whose
+        # best English output is the grammatical description (tense/person),
+        # not a machine translation.
+        base_lemma: Optional[str] = None
+        inflection_gloss: Optional[str] = None
+        # Common templates used on en.wiktionary for inflected forms
+        infl_patterns = [
+            r"\{\{infl of\|[^|}]+\|([^|}]+)",   # {{infl of|it|fare|...}}
+            r"\{\{inflection of\|[^|}]+\|([^|}]+)",
+            r"\{\{form of\|[^|}]+\|([^|}]+)",
+        ]
+        for pat in infl_patterns:
+            m = re.search(pat, lang_section, re.IGNORECASE)
+            if m:
+                base_lemma = (m.group(1) or "").strip()
+                break
+
         # Extract definitions (look for # or #* patterns)
         definitions = []
         def_pattern = r'^#+\s*:?\s*(.+?)(?=\n#|\n\||\n==|$)'
         for match in re.finditer(def_pattern, lang_section, re.MULTILINE):
-            defn = match.group(1).strip()
-            # Clean wikitext markup
-            defn = re.sub(r'\[\[([^\]]+)\]\]', r'\1', defn)  # Remove [[links]], keep text
-            defn = re.sub(r'\{\{t\|[^}]+\}\}', '', defn)  # Remove translation templates
-            defn = re.sub(r'\{\{[^}]*\}\}', '', defn)  # Remove other templates
-            defn = re.sub(r'<!--.*?-->', '', defn, flags=re.DOTALL)  # Remove comments
-            # Extract text from translation templates for English translations
-            trans_in_def = re.findall(r'\{\{t\|en\|([^}]+)\}\}', defn)
+            raw_defn = (match.group(1) or "").strip()
+
+            # Capture a decent gloss for inflected forms (keep some of the template meaning)
+            if inflection_gloss is None and re.search(r"\{\{(infl of|inflection of|form of)\b", raw_defn, re.IGNORECASE):
+                inflection_gloss = _humanize_inflection_template(raw_defn) or _strip_wikitext_markup(raw_defn)
+
+            # Extract text from translation templates embedded in definitions (rare but useful)
+            trans_in_def = re.findall(r"\{\{t\|" + re.escape(target_language) + r"\|([^}]+)\}\}", raw_defn, re.IGNORECASE)
             if trans_in_def:
                 for trans in trans_in_def:
-                    trans_clean = trans.split('|')[0].strip()
+                    trans_clean = (trans.split("|")[0] or "").strip()
                     if trans_clean and trans_clean not in definitions:
                         definitions.append(trans_clean)
-            else:
-                # Clean and add definition
-                defn = re.sub(r'\([^)]*\)', '', defn)  # Remove parenthetical notes
-                defn = defn.strip()
-                if defn and len(defn) > 3 and defn not in definitions:
-                    definitions.append(defn)
+                continue
+
+            # Otherwise: strip templates and keep readable text
+            defn = raw_defn
+            defn = re.sub(r"\{\{t\|[^}]+\}\}", "", defn)  # remove translation templates
+            defn = re.sub(r"\{\{[^}]*\}\}", "", defn)     # remove other templates
+            defn = _strip_wikitext_markup(defn)
+            defn = re.sub(r"\([^)]*\)", "", defn).strip()
+            if defn and len(defn) > 3 and defn not in definitions:
+                definitions.append(defn)
         
         if definitions:
             result['definition'] = '; '.join(definitions[:5])  # Combine up to 5 definitions
+
+        # If this looks like an inflected-form entry, prefer the inflection gloss as the
+        # main definition to prevent misleading machine-translation fallbacks.
+        if inflection_gloss and (not result.get('definition') or len(result.get('definition', '')) < 4):
+            result['definition'] = inflection_gloss
+
+        if base_lemma:
+            result["grammar"]["base_lemma"] = base_lemma
         
         # Extract translations (look for translation templates)
         trans_pattern = r'\{\{t\|' + re.escape(target_language) + r'\|([^}]+)\}\}'
@@ -279,22 +399,35 @@ class WiktextractService:
                 result['definition'] = result['translation']
         
         # Extract part of speech (look for ===Noun===, ===Verb===, etc.)
+        # Skip non-POS subheaders like Etymology/Pronunciation/References.
         pos_pattern = r'===\s*([^=]+?)\s*==='
-        pos_match = re.search(pos_pattern, lang_section)
-        if pos_match:
+        skip_headers = {
+            'etymology', 'pronunciation', 'references', 'anagrams', 'see also',
+            'further reading', 'alternative forms', 'derived terms', 'related terms',
+        }
+        for pos_match in re.finditer(pos_pattern, lang_section):
             pos_text = pos_match.group(1).strip()
-            # Normalize POS
             pos_lower = pos_text.lower()
-            if 'verb' in pos_lower:
-                result['part_of_speech'] = 'VERB'
-            elif 'noun' in pos_lower:
-                result['part_of_speech'] = 'NOUN'
-            elif 'adjective' in pos_lower or 'adj' in pos_lower:
-                result['part_of_speech'] = 'ADJ'
-            elif 'adverb' in pos_lower or 'adv' in pos_lower:
+            if pos_lower in skip_headers:
+                continue
+            # Normalize POS
+            if pos_lower == 'adverb' or pos_lower == 'adv' or pos_lower.endswith(' adverb'):
                 result['part_of_speech'] = 'ADV'
+            elif pos_lower == 'verb' or pos_lower.endswith(' verb'):
+                result['part_of_speech'] = 'VERB'
+            elif pos_lower == 'noun' or pos_lower.endswith(' noun'):
+                result['part_of_speech'] = 'NOUN'
+            elif pos_lower == 'adjective' or pos_lower == 'adj' or pos_lower.endswith(' adjective'):
+                result['part_of_speech'] = 'ADJ'
+            elif 'preposition' in pos_lower:
+                result['part_of_speech'] = 'ADP'
+            elif 'conjunction' in pos_lower:
+                result['part_of_speech'] = 'CONJ'
+            elif 'interjection' in pos_lower:
+                result['part_of_speech'] = 'INTJ'
             else:
                 result['part_of_speech'] = pos_text.upper()
+            break
         
         # Extract forms/conjugations (look for conjugation tables or {{it-verb}} templates)
         forms_list = []
@@ -364,8 +497,9 @@ class WiktextractService:
         if match:
             # Extract section content
             start = match.end()
-            # Find next == header or end of text
-            next_header = re.search(r'\n==', wikitext[start:])
+            # Find the next *language* header (level-2: "==Language==").
+            # Don't stop on POS/subheaders like "===Verb===" which also start with "==".
+            next_header = re.search(r'\n==[^=]', wikitext[start:])
             if next_header:
                 return wikitext[start:start + next_header.start()]
             return wikitext[start:]

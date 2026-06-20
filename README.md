@@ -23,7 +23,7 @@ See [`docs/lexeme-repo-checklist.md`](docs/lexeme-repo-checklist.md).
 
 ## Frontend
 
-Minimal placeholder site deployed from `frontend/` on Vercel.
+Marketing landing page for LexemeReader, deployed from `frontend/` on Vercel.
 
 ```bash
 cd frontend

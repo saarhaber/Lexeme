@@ -15,7 +15,7 @@ Setup instructions (Vercel Blob, rewrites, uploads) are in [`hosting/lexeme-uk/R
 
 ## Frontend
 
-Minimal placeholder site deployed from `frontend/` on Vercel.
+Marketing landing page for LexemeReader, deployed from `frontend/` on Vercel.
 
 ```bash
 cd frontend

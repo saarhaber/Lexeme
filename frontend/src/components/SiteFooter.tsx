@@ -11,8 +11,11 @@ const SiteFooter: React.FC = () => {
           <a href="#features" className="transition hover:text-primary">
             Features
           </a>
-          <a href="#about" className="transition hover:text-primary">
-            About
+          <a href="#faq" className="transition hover:text-primary">
+            FAQ
+          </a>
+          <a href="#screenshots" className="transition hover:text-primary">
+            Screenshots
           </a>
           <a
             href="https://lexeme.uk/dictionaries/catalog.json"

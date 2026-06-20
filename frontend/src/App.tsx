@@ -4,6 +4,8 @@ import HeroSection from './components/HeroSection';
 import FeaturesSection from './components/FeaturesSection';
 import HowItWorksSection from './components/HowItWorksSection';
 import DictionarySection from './components/DictionarySection';
+import ScreenshotsSection from './components/ScreenshotsSection';
+import FaqSection from './components/FaqSection';
 import AboutSection from './components/AboutSection';
 import WaitlistSection from './components/WaitlistSection';
 import SiteFooter from './components/SiteFooter';
@@ -22,8 +24,10 @@ function App() {
         <HeroSection />
         <FeaturesSection />
         <HowItWorksSection />
+        <ScreenshotsSection />
         <DictionarySection />
         <AboutSection />
+        <FaqSection />
         <WaitlistSection />
       </main>
       <SiteFooter />

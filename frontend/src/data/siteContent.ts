@@ -74,3 +74,57 @@ export const dictionaryStats = {
   description:
     'LexemeReader downloads hero dictionary packs from lexeme.uk—no GitHub auth, no private-repo friction.',
 };
+
+export const screenshots = [
+  {
+    id: 'reading',
+    title: 'Read in context',
+    description: 'Tap any word while reading to see definitions without leaving the page.',
+    device: 'phone' as const,
+    alt: 'LexemeReader reading view on Android phone',
+  },
+  {
+    id: 'lookup',
+    title: 'Rich word cards',
+    description: 'Bilingual definitions, grammar cues, and pronunciation in one sheet.',
+    device: 'phone' as const,
+    alt: 'LexemeReader word lookup on Android phone',
+  },
+  {
+    id: 'study',
+    title: 'Swipe to review',
+    description: 'Short FSRS study sessions reinforce words you discovered while reading.',
+    device: 'phone' as const,
+    alt: 'LexemeReader study session on Android phone',
+  },
+  {
+    id: 'library-tablet',
+    title: 'Your library, any screen',
+    description: 'Import EPUBs and PDFs, track progress, and pick up where you left off.',
+    device: 'tablet' as const,
+    alt: 'LexemeReader library on iPad',
+  },
+];
+
+export const faqs = [
+  {
+    question: 'What is LexemeReader?',
+    answer:
+      'LexemeReader is a mobile app for learning vocabulary from real books. Import a title, read in the app, tap words for definitions, and review with spaced repetition.',
+  },
+  {
+    question: 'Will LexemeReader spoil my book?',
+    answer:
+      'No. Vocabulary cards are tied to text you have already read. Lexeme never surfaces plot details from pages you have not reached yet.',
+  },
+  {
+    question: 'Which languages are supported?',
+    answer:
+      'LexemeReader supports reading and vocabulary extraction across many languages. The first hero offline dictionary pack is Italian→English, hosted on lexeme.uk.',
+  },
+  {
+    question: 'When can I download the app?',
+    answer:
+      'LexemeReader is in active development. Join the waitlist and we will notify you when it launches on the App Store and Google Play.',
+  },
+];

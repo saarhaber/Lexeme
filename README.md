@@ -13,6 +13,14 @@ Hero dictionary packs for **LexemeReader** are served from this site:
 
 Setup instructions (Vercel Blob, rewrites, uploads) are in [`hosting/lexeme-uk/README.md`](hosting/lexeme-uk/README.md).
 
+Run the repo checklist and automated checks:
+
+```bash
+./scripts/verify-dictionary-hosting.sh
+```
+
+See [`docs/lexeme-repo-checklist.md`](docs/lexeme-repo-checklist.md).
+
 ## Frontend
 
 Minimal placeholder site deployed from `frontend/` on Vercel.

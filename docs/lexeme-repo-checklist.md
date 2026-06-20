@@ -19,11 +19,18 @@ Automated checks after changes:
 ./scripts/verify-dictionary-hosting.sh
 ```
 
+One-shot Blob upload + rewrite (needs `BLOB_READ_WRITE_TOKEN` or `VERCEL_TOKEN` and the built `.db` from LexemeReader):
+
+```bash
+BLOB_READ_WRITE_TOKEN=... ./scripts/setup-hero-pack-blob.sh /path/to/ita-eng.db
+git add frontend/vercel.json && git commit -m "Wire hero pack rewrite to Vercel Blob" && git push
+```
+
 ---
 
 ## One-time setup
 
-- [ ] **Copy the catalog into this repo**
+- [x] **Copy the catalog into this repo**
 
   From LexemeReader, copy:
 
@@ -80,10 +87,10 @@ Automated checks after changes:
   https://xxxxxxxx.public.blob.vercel-storage.com/dictionaries/ita-eng.db
   ```
 
-- [ ] **Add a `vercel.json` rewrite** so `lexeme.uk/dictionaries/ita-eng.db` proxies to Blob
+- [x] **Add a `vercel.json` rewrite template** (`frontend/vercel.json` exists; still needs real Blob URL)
 
   Copy `hosting/lexeme-uk/vercel.json` to `frontend/vercel.json` (Vercel root directory is `frontend`).
-  Replace `BLOB_BASE_URL` with your Blob store origin (everything before `/dictionaries/`):
+  Replace `BLOB_BASE_URL` with your Blob store origin (everything before `/dictionaries/`), or run `./scripts/setup-hero-pack-blob.sh` after upload:
 
   ```json
   {
@@ -98,7 +105,9 @@ Automated checks after changes:
 
   Commit and push.
 
-- [ ] **Deploy and verify both URLs return HTTP 200**
+- [x] **Deploy placeholder site** (live at `https://lexeme.uk/`)
+
+- [ ] **Deploy and verify both dictionary URLs return HTTP 200**
 
   ```bash
   curl -sI https://lexeme.uk/dictionaries/catalog.json
@@ -174,4 +183,6 @@ If lexeme.uk is unreachable, LexemeReader falls back to:
 | Live hero pack (`/dictionaries/ita-eng.db`) | **Fail** — rewrite still uses `BLOB_BASE_URL` placeholder; endpoint returns HTML |
 | Placeholder site (`/`) | Pass |
 
-**Remaining one-time work:** create Blob store, upload `ita-eng.db`, replace `BLOB_BASE_URL` in `frontend/vercel.json`, redeploy.
+**Remaining one-time work:** create Blob store, upload `ita-eng.db` (`./scripts/setup-hero-pack-blob.sh`), commit `frontend/vercel.json`, redeploy, smoke-test in app.
+
+Requires credentials not available in CI: `BLOB_READ_WRITE_TOKEN` or `VERCEL_TOKEN`, plus `ita-eng.db` built in LexemeReader (~153 MB).

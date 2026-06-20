@@ -1,69 +1,177 @@
-# Lexeme repo checklist
+# Lexeme repo checklist (hero dictionaries)
 
-Run this after changes to dictionary hosting or the placeholder site. Automated checks:
+PR **#3** in **LexemeReader** moved hero dictionary downloads from GitHub Releases to
+**[lexeme.uk](https://lexeme.uk)**. The mobile app now expects these URLs:
+
+| What | URL |
+|------|-----|
+| Catalog | `https://lexeme.uk/dictionaries/catalog.json` |
+| Italian hero pack | `https://lexeme.uk/dictionaries/ita-eng.db` |
+
+Everything below is work in **this repo** ([`saarhaber/Lexeme`](https://github.com/saarhaber/Lexeme) — the Vercel project for lexeme.uk).
+
+Starter files are copied from LexemeReader under `hosting/lexeme-uk/`. Longer explanations:
+[`hosting/lexeme-uk/README.md`](../hosting/lexeme-uk/README.md).
+
+Automated checks after changes:
 
 ```bash
 ./scripts/verify-dictionary-hosting.sh
 ```
 
-## 1. Placeholder frontend
+---
 
-- [ ] `frontend/src/App.tsx` is the minimal coming-soon page (no auth, routes, or API client code)
-- [ ] `frontend/public/index.html` and `manifest.json` use Lexeme branding
-- [ ] `cd frontend && npm ci && npm run build` succeeds
-- [ ] `frontend/build/dictionaries/catalog.json` exists after build
+## One-time setup
 
-## 2. Dictionary catalog in git
+- [ ] **Copy the catalog into this repo**
 
-- [ ] `frontend/public/dictionaries/catalog.json` exists
-- [ ] It matches `hosting/lexeme-uk/frontend-public/dictionaries/catalog.json`
-- [ ] Each pack has: `name`, `source`, `headwords`, `size_bytes`, `download_url`, `sha512`, `version`
-- [ ] `download_url` points at `https://lexeme.uk/dictionaries/<name>.db`
+  From LexemeReader, copy:
 
-## 3. Vercel rewrite for hero packs
+  ```
+  hosting/lexeme-uk/frontend-public/dictionaries/catalog.json
+    → frontend/public/dictionaries/catalog.json
+  ```
 
-Large `.db` files live in **Vercel Blob**, not in `public/` (Hobby deploy limit is 100 MB; the Italian pack is ~153 MB).
+  Commit and push. After Vercel redeploys:
 
-- [ ] `frontend/vercel.json` exists with a rewrite for `/dictionaries/ita-eng.db`
-- [ ] `BLOB_BASE_URL` in `frontend/vercel.json` is replaced with your Blob store origin (not the literal placeholder)
-- [ ] Blob store is public (e.g. `lexeme-dictionaries`)
+  ```bash
+  curl -sI https://lexeme.uk/dictionaries/catalog.json
+  # expect HTTP 200
+  ```
 
-Upload (from LexemeReader after building the pack):
+- [ ] **Create a Vercel Blob store** on the Lexeme project
 
-```bash
-vercel blob put tools/data/ita-eng.db --pathname dictionaries/ita-eng.db
-```
+  1. [Vercel dashboard](https://vercel.com) → **Lexeme** project
+  2. **Storage** → **Create Database / Store** → **Blob**
+  3. Name it e.g. `lexeme-dictionaries`, access **Public**
 
-Full steps: [`hosting/lexeme-uk/README.md`](../hosting/lexeme-uk/README.md)
+- [ ] **Install and link the Vercel CLI** (if not already)
 
-## 4. Production verification
+  ```bash
+  npm i -g vercel
+  vercel login
+  vercel link   # link to the Lexeme project
+  ```
 
-After deploy:
+- [ ] **Build the hero pack** (in LexemeReader, not Lexeme)
 
-```bash
-curl -sI https://lexeme.uk/dictionaries/catalog.json
-# HTTP/2 200, content-type: application/json
+  ```bash
+  python3 tools/build_dictionary.py --lang italian
+  # → tools/data/ita-eng.db  (~153 MB)
+  ```
 
-curl -sI https://lexeme.uk/dictionaries/ita-eng.db
-# HTTP/2 200, content-length: 159973376
+  Or run the publish script (build only):
 
-curl -sI https://lexeme.uk/
-# HTTP/2 200, text/html
-```
+  ```bash
+  ./tools/publish_hero_packs.sh italian
+  ```
 
-## 5. Updating a pack later
+- [ ] **Upload the `.db` to Vercel Blob**
 
-1. Build the new `.db` in LexemeReader
-2. `vercel blob put … --pathname dictionaries/ita-eng.db`
-3. Update `size_bytes`, `sha512`, and `version` in both catalog copies
-4. Commit, push, redeploy Lexeme; update bundled fallback in LexemeReader
+  From LexemeReader (after `vercel link` to the Lexeme project):
 
-## Status (last run)
+  ```bash
+  vercel blob put tools/data/ita-eng.db --pathname dictionaries/ita-eng.db
+  ```
+
+  The command prints a public URL like:
+
+  ```
+  https://xxxxxxxx.public.blob.vercel-storage.com/dictionaries/ita-eng.db
+  ```
+
+- [ ] **Add a `vercel.json` rewrite** so `lexeme.uk/dictionaries/ita-eng.db` proxies to Blob
+
+  Copy `hosting/lexeme-uk/vercel.json` to `frontend/vercel.json` (Vercel root directory is `frontend`).
+  Replace `BLOB_BASE_URL` with your Blob store origin (everything before `/dictionaries/`):
+
+  ```json
+  {
+    "rewrites": [
+      {
+        "source": "/dictionaries/ita-eng.db",
+        "destination": "https://xxxxxxxx.public.blob.vercel-storage.com/dictionaries/ita-eng.db"
+      }
+    ]
+  }
+  ```
+
+  Commit and push.
+
+- [ ] **Deploy and verify both URLs return HTTP 200**
+
+  ```bash
+  curl -sI https://lexeme.uk/dictionaries/catalog.json
+  # expect HTTP 200, content-type: application/json
+
+  curl -sI https://lexeme.uk/dictionaries/ita-eng.db
+  # expect HTTP 200, content-length: 159973376
+  ```
+
+  Or run:
+
+  ```bash
+  ./scripts/verify-dictionary-hosting.sh
+  ```
+
+- [ ] **Smoke-test hero pack download in the app**
+
+  Open LexemeReader on a device or simulator, trigger a hero pack download, and confirm it completes using the lexeme.uk URLs (not GitHub Releases).
+
+---
+
+## On future pack updates
+
+- [ ] **Build and publish from LexemeReader**
+
+  ```bash
+  ./tools/publish_hero_packs.sh italian --lexeme-uk
+  ```
+
+  This rebuilds the pack, uploads to Vercel Blob, and prints updated `size_bytes`, `sha512`, and `version`.
+
+- [ ] **Update `catalog.json` in both repos**
+
+  Edit both copies so they stay in sync:
+
+  - `frontend/public/dictionaries/catalog.json` (this repo)
+  - `hosting/lexeme-uk/frontend-public/dictionaries/catalog.json` (LexemeReader)
+
+  Update `size_bytes`, `sha512`, and `version` for the changed pack.
+
+- [ ] **Commit, push, and redeploy**
+
+  Push Lexeme (catalog + any config changes) and LexemeReader (bundled fallback asset under `assets/hero_packs/`).
+
+- [ ] **Re-run verification**
+
+  ```bash
+  ./scripts/verify-dictionary-hosting.sh
+  ```
+
+---
+
+## Why Blob, not `public/`?
+
+The full Italian hero pack is ~153 MB. Vercel's deployment bundle limit (100 MB on Hobby) makes it unsuitable to commit into `frontend/public/`. Use **Vercel Blob** for large `.db` files; only the small `catalog.json` lives in git.
+
+## App fallback
+
+If lexeme.uk is unreachable, LexemeReader falls back to:
+
+1. Bundled `assets/hero_packs/catalog.json`
+2. Bundled `assets/hero_packs/ita-eng.db` (~3 MB FreeDict-based pack)
+
+---
+
+## Status (last automated run)
 
 | Check | Result |
 |-------|--------|
-| Catalog files in repo | Pass |
+| Catalog in repo (`frontend/public` + `hosting/lexeme-uk` template) | Pass |
 | Frontend build | Pass |
-| Live catalog | Pass |
-| Live hero pack (`ita-eng.db`) | **Fail** — rewrite still uses `BLOB_BASE_URL` placeholder; endpoint returns HTML |
-| Placeholder site | Pass |
+| Live catalog (`/dictionaries/catalog.json`) | Pass |
+| Live hero pack (`/dictionaries/ita-eng.db`) | **Fail** — rewrite still uses `BLOB_BASE_URL` placeholder; endpoint returns HTML |
+| Placeholder site (`/`) | Pass |
+
+**Remaining one-time work:** create Blob store, upload `ita-eng.db`, replace `BLOB_BASE_URL` in `frontend/vercel.json`, redeploy.

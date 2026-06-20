@@ -1,0 +1,13 @@
+{
+  "packs": [
+    {
+      "name": "ita-eng",
+      "source": "ita",
+      "headwords": 586048,
+      "size_bytes": 159973376,
+      "download_url": "https://lexeme.uk/dictionaries/ita-eng.db",
+      "sha512": "bf918a56c0dc91a45335fb9d30fd2fe504757dae181707b3ed6eaaf8ebade05c5f13f28bb9fbbaf4943e8ba0b648944e294f6acabdbe7c538a1713fcf34d854b",
+      "version": "1.0"
+    }
+  ]
+}

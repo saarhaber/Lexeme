@@ -1,47 +1,27 @@
 # Lexeme
 
-Learn vocabulary from books you love—without spoilers. Upload any book in any language and master vocabulary in context.
+Website and dictionary hosting for the Lexeme app at [lexeme.uk](https://lexeme.uk).
 
-## Features
+## Dictionary hosting
 
-- 📖 **Read Any Book** - Upload PDFs, EPUBs, or text files in any language
-- 🔍 **Click to Learn** - Click any word while reading to see its definition instantly
-- 🚫 **Zero Spoilers** - Only shows vocabulary from text you've already read
-- 🎯 **Smart Review** - Spaced repetition helps you remember words long-term
-- 📊 **Track Progress** - Watch your vocabulary grow as you read more books
+Hero dictionary packs for **LexemeReader** are served from this site:
 
-## Tech Stack
+| File | URL |
+|------|-----|
+| Catalog | `https://lexeme.uk/dictionaries/catalog.json` |
+| Italian hero pack | `https://lexeme.uk/dictionaries/ita-eng.db` |
 
-- **Frontend**: React + TypeScript + Tailwind CSS
-- **Backend**: FastAPI + Python + SQLite
-- **NLP**: spaCy + NLTK for vocabulary extraction
-- **SRS**: FSRS algorithm for spaced repetition
+Setup instructions (Vercel Blob, rewrites, uploads) are in [`hosting/lexeme-uk/README.md`](hosting/lexeme-uk/README.md).
 
-## Quick Start
+## Frontend
 
-1. **Backend Setup**:
-   ```bash
-   cd backend
-   ./setup.sh
-   source venv/bin/activate
-   python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
+Minimal placeholder site deployed from `frontend/` on Vercel.
 
-2. **Frontend Setup**:
-   ```bash
-   cd frontend
-   npm install
-   npm start
-   ```
-
-3. **Or use the start script**:
-   ```bash
-   ./START_SERVERS.sh
-   ```
-
-## Production
-
-The app is configured to run at [lexeme.uk](https://lexeme.uk).
+```bash
+cd frontend
+npm install
+npm start
+```
 
 ## License
 

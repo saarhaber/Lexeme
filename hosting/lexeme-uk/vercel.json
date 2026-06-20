@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/dictionaries/ita-eng.db",
+      "destination": "BLOB_BASE_URL/dictionaries/ita-eng.db"
+    }
+  ]
+}

@@ -4,13 +4,19 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        primary: "#3A70FF", // Soft blue
-        secondary: "#FFD86A", // Warm yellow
-        background: "#F8F8F8", // Off-white
+        primary: "#B5651D",
+        secondary: "#8A7659",
+        background: "#F4ECD8",
+        surface: "#FBF5E6",
+        text: "#4A3B28",
+        highlight: "rgba(181, 101, 29, 0.27)",
+        "icon-purple": "#2A1E5C",
+        "icon-purple-dark": "#0C0826",
+        gold: "#FFD15C",
       },
       fontFamily: {
-        heading: ["Inter", "sans-serif"],
-        body: ["Source Sans Pro", "sans-serif"],
+        heading: ["Georgia", "Times New Roman", "serif"],
+        body: ["Helvetica Neue", "Helvetica", "Arial", "sans-serif"],
       },
       screens: {
         xs: "360px",
@@ -27,8 +33,8 @@ module.exports = {
         "safe-b": "env(safe-area-inset-bottom, 0px)",
       },
       boxShadow: {
-        floating: "0 20px 45px rgba(15, 23, 42, 0.12)",
-        "soft-card": "0 8px 24px rgba(15, 23, 42, 0.08)",
+        floating: "0 20px 45px rgba(74, 59, 40, 0.12)",
+        "soft-card": "0 8px 24px rgba(74, 59, 40, 0.08)",
       },
       borderRadius: {
         "3xl": "1.75rem",

@@ -11,11 +11,11 @@ const ScreenshotsSection: React.FC = () => {
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <div className="mb-12 max-w-2xl">
           <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-primary">App preview</p>
-          <h2 className="text-3xl font-heading font-bold text-gray-900 sm:text-4xl">
-            See LexemeReader in action
+          <h2 className="text-3xl font-heading font-bold text-text sm:text-4xl">
+            See Lexeme in action
           </h2>
-          <p className="mt-4 text-lg text-gray-600">
-            Reading, lookup, and review—designed for phones and tablets.
+          <p className="mt-4 text-lg text-secondary">
+            Reading, lookup, and review — designed for phones and tablets.
           </p>
         </div>
 
@@ -44,16 +44,16 @@ const ScreenshotsSection: React.FC = () => {
             />
           ))}
           <div className="space-y-4">
-            <h3 className="text-2xl font-heading font-bold text-gray-900">Built for deep reading</h3>
-            <p className="leading-relaxed text-gray-700">
-              On tablet, LexemeReader gives you more room for long-form reading sessions, side-by-side
-              vocabulary lists, and comfortable study review—without losing the tap-to-learn flow that
+            <h3 className="text-2xl font-heading font-bold text-text">Built for deep reading</h3>
+            <p className="leading-relaxed text-secondary">
+              On tablet, Lexeme gives you more room for long-form reading sessions, side-by-side
+              vocabulary lists, and comfortable study review — without losing the tap-to-learn flow that
               keeps you in the story.
             </p>
-            <ul className="space-y-2 text-sm text-gray-600">
-              <li>• Import EPUB and PDF from Files or cloud storage</li>
+            <ul className="space-y-2 text-sm text-secondary">
+              <li>• Import EPUB from Files or cloud storage</li>
               <li>• Offline hero dictionaries downloaded from lexeme.uk</li>
-              <li>• FSRS review sessions sync across your devices</li>
+              <li>• Review sessions sync across your devices</li>
             </ul>
           </div>
         </div>

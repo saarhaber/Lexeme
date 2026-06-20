@@ -7,7 +7,7 @@ const WaitlistSection: React.FC = () => {
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!email.trim()) return;
-    window.location.href = `mailto:hello@lexeme.uk?subject=LexemeReader%20waitlist&body=Please%20notify%20me%20when%20LexemeReader%20launches.%0A%0AEmail%3A%20${encodeURIComponent(email.trim())}`;
+    window.location.href = `mailto:hello@lexeme.uk?subject=Lexeme%20waitlist&body=Please%20notify%20me%20when%20Lexeme%20launches.%0A%0AEmail%3A%20${encodeURIComponent(email.trim())}`;
     setSubmitted(true);
   };
 
@@ -15,14 +15,14 @@ const WaitlistSection: React.FC = () => {
     <section id="notify" className="py-16 sm:py-24">
       <div className="mx-auto max-w-3xl px-5 text-center sm:px-8">
         <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-primary">Early access</p>
-        <h2 className="mb-4 text-3xl font-heading font-bold text-gray-900 sm:text-4xl">
+        <h2 className="mb-4 text-3xl font-heading font-bold text-text sm:text-4xl">
           Be first to read with Lexeme
         </h2>
-        <p className="mb-8 text-lg text-gray-600">
-          LexemeReader is in active development. Leave your email and we will let you know when the app is ready.
+        <p className="mb-8 text-lg text-secondary">
+          Lexeme is in active development. Leave your email and we will let you know when the app is ready.
         </p>
         {submitted ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-6 py-4 text-emerald-800" role="status">
+          <p className="rounded-xl border border-green-200 bg-green-50 px-6 py-4 text-green-800" role="status">
             Thanks! Your email client should open so you can send your request.
           </p>
         ) : (
@@ -37,7 +37,7 @@ const WaitlistSection: React.FC = () => {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@example.com"
-              className="flex-1 rounded-lg border border-gray-300 px-4 py-3 text-gray-900 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="flex-1 rounded-lg border border-secondary/30 bg-surface px-4 py-3 text-text focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             <button type="submit" className="btn-primary px-6 py-3 whitespace-nowrap">
               Notify me

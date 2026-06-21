@@ -1,45 +1,52 @@
 export const features = [
   {
-    title: 'Bring your own books',
+    id: 'books' as const,
+    index: 'I',
+    title: 'Your books, not ours',
     description:
-      'Import EPUBs from your library and read them cover to cover — offline, on your device, with no store or subscription.',
-    icon: '📖',
+      'Import any EPUB. Read offline. No store, no subscription — just the novel already on your shelf.',
   },
   {
+    id: 'tap' as const,
+    index: 'II',
     title: 'Guess before you know',
     description:
-      'Tap a word and try to recall it before the translation appears. Look things up without breaking the reading flow.',
-    icon: '👆',
+      'Tap a word, try to recall it, then see the definition. Lookups stay on the page — the story keeps moving.',
   },
   {
-    title: 'Calm sepia reading',
+    id: 'sepia' as const,
+    index: 'III',
+    title: 'Sepia by default',
     description:
-      'Warm paper tones designed for long reading sessions. Sepia is the default — the same comfortable view as the app.',
-    icon: '☕',
+      'Warm paper tones for long sessions. The reader you see on the site is the reader you get in the app.',
   },
   {
-    title: 'Finish the book',
+    id: 'finish' as const,
+    index: 'IV',
+    title: 'Finish the chapter',
     description:
-      'Vocabulary review supports your reading — words you tap while reading come back in short sessions so you keep turning pages.',
-    icon: '📚',
+      'Words you tap come back in short review sessions — enough to help the next page land, not enough to pull you out.',
   },
 ];
 
 export const steps = [
   {
-    number: '1',
+    chapter: 'One',
     title: 'Import a book',
-    description: 'Add an EPUB from your library — a novel, essay, or anything you actually want to read in your target language.',
+    description:
+      'An EPUB from your library — a novel, an essay, anything you actually want to read in the original language.',
   },
   {
-    number: '2',
+    chapter: 'Two',
     title: 'Read. Tap. Guess.',
-    description: 'Turn pages in warm sepia. Tap words you do not know, guess the meaning, then see the definition — all without leaving the book.',
+    description:
+      'Turn pages in sepia. When a word stops you, tap it, guess, then read on. No tab switching, no lesson mode.',
   },
   {
-    number: '3',
-    title: 'Keep reading',
-    description: 'Pick up where you left off. Optional review sessions reinforce words you met in the story — so the next chapter feels easier.',
+    chapter: 'Three',
+    title: 'Pick up where you stopped',
+    description:
+      'Lexeme remembers your place. Review what you looked up if you want — then back to the book.',
   },
 ];
 

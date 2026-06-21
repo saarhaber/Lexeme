@@ -42,6 +42,19 @@
   .reading-surface {
     @apply rounded-2xl border border-secondary/15 bg-background;
   }
+
+  .section-kicker {
+    @apply font-heading text-[0.8125rem] tracking-small-caps text-secondary;
+    font-variant: small-caps;
+  }
+
+  .feature-rule {
+    @apply h-px w-full bg-secondary/20;
+  }
+
+  .page-margin {
+    @apply relative before:absolute before:-left-3 before:top-0 before:h-full before:w-px before:bg-secondary/15 sm:before:-left-6;
+  }
 }
 
 @layer utilities {

@@ -35,6 +35,10 @@ module.exports = {
       boxShadow: {
         floating: "0 20px 45px rgba(74, 59, 40, 0.12)",
         "soft-card": "0 8px 24px rgba(74, 59, 40, 0.08)",
+        inset: "inset 0 1px 0 rgba(255, 255, 255, 0.45)",
+      },
+      letterSpacing: {
+        "small-caps": "0.14em",
       },
       borderRadius: {
         "3xl": "1.75rem",

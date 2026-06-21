@@ -16,13 +16,17 @@ const WaitlistSection: React.FC = () => {
       <div className="mx-auto max-w-3xl px-5 text-center sm:px-8">
         <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-primary">Early access</p>
         <h2 className="mb-4 text-3xl font-heading font-bold text-text sm:text-4xl">
-          Be first to read with Lexeme
+          Be first to read your books with Lexeme
         </h2>
         <p className="mb-8 text-lg text-secondary">
-          Lexeme is in active development. Leave your email and we will let you know when the app is ready.
+          Lexeme is in active development — a forever-free EPUB reader for language learners. Leave your
+          email and we will let you know when the app is ready.
         </p>
         {submitted ? (
-          <p className="rounded-xl border border-green-200 bg-green-50 px-6 py-4 text-green-800" role="status">
+          <p
+            className="rounded-xl border border-primary/30 bg-highlight/30 px-6 py-4 text-text"
+            role="status"
+          >
             Thanks! Your email client should open so you can send your request.
           </p>
         ) : (

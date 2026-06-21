@@ -13,11 +13,11 @@ const ScreenshotFrame: React.FC<{
   return (
     <figure className="flex flex-col items-center">
       <div
-        className={`relative overflow-hidden border border-secondary/20 bg-icon-purple-dark shadow-floating ${
-          isPhone ? 'w-[220px] rounded-[2rem] p-2' : 'w-full max-w-md rounded-[1.25rem] p-2.5'
+        className={`relative overflow-hidden border border-secondary/25 bg-background shadow-floating ${
+          isPhone ? 'w-[220px] rounded-[2rem] p-1.5' : 'w-full max-w-md rounded-[1.25rem] p-2'
         }`}
       >
-        <div className={`overflow-hidden bg-background ${isPhone ? 'rounded-[1.5rem]' : 'rounded-xl'}`}>
+        <div className={`overflow-hidden bg-background ${isPhone ? 'rounded-[1.65rem]' : 'rounded-xl'}`}>
           {!failed ? (
             <img
               src={imageSrc}

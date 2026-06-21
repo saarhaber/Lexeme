@@ -11,9 +11,9 @@ const DictionarySection: React.FC = () => {
               Offline dictionaries
             </p>
             <h2 className="mb-4 text-3xl font-heading font-bold text-text">
-              Hero packs hosted on lexeme.uk
+              Look up words while you read — even offline
             </h2>
-            <p className="mb-6 text-secondary leading-relaxed">{dictionaryStats.description}</p>
+            <p className="mb-6 leading-relaxed text-secondary">{dictionaryStats.description}</p>
             <dl className="grid grid-cols-3 gap-4">
               <div className="rounded-xl bg-background p-4 shadow-sm">
                 <dt className="text-xs uppercase tracking-wide text-secondary">Language</dt>
@@ -29,9 +29,9 @@ const DictionarySection: React.FC = () => {
               </div>
             </dl>
           </div>
-          <div className="rounded-2xl bg-icon-purple-dark p-5 font-mono text-sm text-green-400 shadow-floating">
-            <p className="text-secondary/70">GET /dictionaries/catalog.json</p>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-surface">
+          <div className="rounded-2xl border border-secondary/20 bg-background p-5 font-mono text-sm shadow-soft-card">
+            <p className="text-secondary">GET /dictionaries/catalog.json</p>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-text">
 {`{
   "packs": [{
     "name": "ita-eng",

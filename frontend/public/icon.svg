@@ -1,0 +1,26 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2A1E5C"/><stop offset="1" stop-color="#0C0826"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.52" r="0.5">
+      <stop offset="0" stop-color="#7C5BE0" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#7C5BE0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gly" x1="250" y1="380" x2="790" y2="700" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF77D6"/><stop offset="0.55" stop-color="#9A6CF4"/><stop offset="1" stop-color="#46CBF0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <ellipse cx="512" cy="545" rx="360" ry="320" fill="url(#glow)"/>
+  <!-- open book, glossy gradient -->
+  <g stroke="#2C1F5A" stroke-width="6" stroke-linejoin="round">
+    <path d="M512 408 C 404 360, 296 364, 246 408 L 246 700 C 296 660, 404 656, 512 700 Z" fill="url(#gly)"/>
+    <path d="M512 408 C 620 360, 728 364, 778 408 L 778 700 C 728 660, 620 656, 512 700 Z" fill="url(#gly)"/>
+  </g>
+  <path d="M512 408 L 512 700" stroke="#2C1F5A" stroke-width="9" stroke-linecap="round"/>
+  <!-- gloss highlight on the upper pages -->
+  <path d="M512 408 C 404 360, 296 364, 250 406 C 300 388, 404 392, 512 432 C 620 392, 724 388, 774 406 C 728 364, 620 360, 512 408 Z" fill="#FFFFFF" opacity="0.30"/>
+  <!-- gold sparkle accent (family motif) -->
+  <path transform="translate(742,318) scale(0.46)" d="M0 -100 C 12 -34 34 -12 100 0 C 34 12 12 34 0 100 C -12 34 -34 12 -100 0 C -34 -12 -12 -34 0 -100 Z" fill="#FFD15C"/>
+</svg>

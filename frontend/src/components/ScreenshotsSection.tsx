@@ -12,10 +12,11 @@ const ScreenshotsSection: React.FC = () => {
         <div className="mb-12 max-w-2xl">
           <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-primary">App preview</p>
           <h2 className="text-3xl font-heading font-bold text-text sm:text-4xl">
-            See Lexeme in action
+            The same sepia reader as the app
           </h2>
           <p className="mt-4 text-lg text-secondary">
-            Reading, lookup, and review — designed for phones and tablets.
+            Read tab, word lookup, and guess-before-you-know — the website matches the app: warm paper
+            tones, serif book text, and calm copper accents.
           </p>
         </div>
 
@@ -44,16 +45,15 @@ const ScreenshotsSection: React.FC = () => {
             />
           ))}
           <div className="space-y-4">
-            <h3 className="text-2xl font-heading font-bold text-text">Built for deep reading</h3>
+            <h3 className="text-2xl font-heading font-bold text-text">Built for long reading sessions</h3>
             <p className="leading-relaxed text-secondary">
-              On tablet, Lexeme gives you more room for long-form reading sessions, side-by-side
-              vocabulary lists, and comfortable study review — without losing the tap-to-learn flow that
-              keeps you in the story.
+              On tablet, Lexeme gives you more room for novels and essays — the same sepia pages, the same
+              tap-to-guess flow, and your library in one place. Read first; vocabulary follows.
             </p>
             <ul className="space-y-2 text-sm text-secondary">
               <li>• Import EPUB from Files or cloud storage</li>
               <li>• Offline hero dictionaries downloaded from lexeme.uk</li>
-              <li>• Review sessions sync across your devices</li>
+              <li>• Pick up exactly where you stopped reading</li>
             </ul>
           </div>
         </div>

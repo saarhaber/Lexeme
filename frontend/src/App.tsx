@@ -5,6 +5,7 @@ import FeaturesSection from './components/FeaturesSection';
 import HowItWorksSection from './components/HowItWorksSection';
 import DictionarySection from './components/DictionarySection';
 import ScreenshotsSection from './components/ScreenshotsSection';
+import ComparisonSection from './components/ComparisonSection';
 import FaqSection from './components/FaqSection';
 import AboutSection from './components/AboutSection';
 import WaitlistSection from './components/WaitlistSection';
@@ -23,6 +24,7 @@ function App() {
       <main id="main-content" className="flex-1">
         <HeroSection />
         <FeaturesSection />
+        <ComparisonSection />
         <HowItWorksSection />
         <ScreenshotsSection />
         <DictionarySection />

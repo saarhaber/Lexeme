@@ -38,6 +38,10 @@
   .card {
     @apply rounded-2xl border border-secondary/20 bg-surface p-6 shadow-soft-card;
   }
+
+  .reading-surface {
+    @apply rounded-2xl border border-secondary/15 bg-background;
+  }
 }
 
 @layer utilities {

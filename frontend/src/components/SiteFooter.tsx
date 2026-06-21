@@ -6,10 +6,13 @@ const SiteFooter: React.FC = () => {
   return (
     <footer className="border-t border-secondary/20 bg-surface/70 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 text-sm text-secondary sm:flex-row sm:px-8">
-        <p>© {year} Saar Labs. Lexeme and lexeme.uk.</p>
+        <p>© {year} Saar Labs. Lexeme and lexeme.uk — forever free.</p>
         <div className="flex flex-wrap items-center justify-center gap-6">
           <a href="#features" className="transition hover:text-primary">
             Features
+          </a>
+          <a href="#compare" className="transition hover:text-primary">
+            Compare
           </a>
           <a href="#faq" className="transition hover:text-primary">
             FAQ

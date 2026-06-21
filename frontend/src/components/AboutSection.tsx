@@ -8,16 +8,16 @@ const AboutSection: React.FC = () => {
         <div className="rounded-3xl border border-secondary/20 bg-surface p-8 shadow-soft-card sm:p-12">
           <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-primary">About</p>
           <h2 className="mb-4 text-3xl font-heading font-bold text-text">
-            A Saar Labs experiment for calm reading
+            A Saar Labs experiment for reading in another language
           </h2>
           <p className="max-w-3xl text-lg leading-relaxed text-secondary">
             Lexeme is a Saar Labs project built to answer a simple question:{' '}
             <strong className="text-text">
-              What if language learners could keep reading the stories they love — guessing words before
-              being told, all on their own books?
+              What if you could finish the novel on your shelf — in Italian, French, or any language you
+              are learning — without switching apps or paying a subscription?
             </strong>{' '}
-            We built a calm EPUB reader with warm sepia pages, tap-to-guess vocabulary, and spaced
-            repetition so the words you discover today become automatic tomorrow.
+            We built a calm EPUB reader with warm sepia pages and tap-to-guess lookups. Vocabulary review
+            is there when you want it, but the point is the book.
           </p>
         </div>
 

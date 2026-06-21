@@ -8,10 +8,11 @@ const FeaturesSection: React.FC = () => {
         <div className="mb-12 max-w-2xl">
           <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-primary">Features</p>
           <h2 className="text-3xl font-heading font-bold text-text sm:text-4xl">
-            The reading half of your learning stack
+            Everything you need to finish the book
           </h2>
           <p className="mt-4 text-lg text-secondary">
-            Lexeme keeps you in the book. Guess a word, learn its meaning, and keep turning pages.
+            Lexeme keeps you in the story. Import a novel, read in sepia, tap words when you need help —
+            and keep turning pages.
           </p>
         </div>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">

@@ -9,8 +9,11 @@ const HowItWorksSection: React.FC = () => {
           <div className="mb-10 text-center">
             <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-primary">How it works</p>
             <h2 className="text-3xl font-heading font-bold text-text sm:text-4xl">
-              From first page to fluent
+              From first page to last chapter
             </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-secondary">
+              No lesson plans — just the book you chose, a calm reader, and help when you need a word.
+            </p>
           </div>
           <div className="grid gap-8 md:grid-cols-3">
             {steps.map((step) => (
